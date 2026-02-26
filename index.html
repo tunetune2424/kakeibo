@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -9,21 +10,36 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.min.css">
-    
+
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <style>
         @keyframes fadeInRight {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
         }
+
         .animate-month-in {
             animation: fadeInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        body { -webkit-tap-highlight-color: transparent; }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
     </style>
 </head>
+
 <body class="bg-slate-50">
     <div id="root"></div>
 
@@ -39,7 +55,7 @@
             appId: "1:686700068143:web:ab642169bf42364e8f35da",
             measurementId: "G-XYV1JC3RY6"
         };
-        
+
         if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
         }
@@ -64,7 +80,7 @@
             const [tempBudget, setTempBudget] = useState('');
             const [showMonthPicker, setShowMonthPicker] = useState(false);
             const [animKey, setAnimKey] = useState(0);
-            
+
             const [editingId, setEditingId] = useState(null);
             const [editName, setEditName] = useState('');
             const [editAmount, setEditAmount] = useState('');
@@ -80,10 +96,9 @@
 
             const getNearbyMonths = () => {
                 const months = [];
-                const [year, month] = getCurrentMonthStr().split('-').map(Number);
-                for (let i = 1; i <= 12; i++) {
-                    const d = new Date(year, month - 1 + i, 1);
-                    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                const [year] = currentMonth.split('-').map(Number);
+                for (let m = 1; m <= 12; m++) {
+                    months.push(`${year}-${String(m).padStart(2, '0')}`);
                 }
                 return months;
             };
@@ -140,7 +155,7 @@
 
             const saveEdit = () => {
                 if (!editName || !editAmount || Number(editAmount) <= 0) return;
-                const newExpenses = expenses.map(item => 
+                const newExpenses = expenses.map(item =>
                     item.id === editingId ? { ...item, name: editName, amount: Number(editAmount) } : item
                 );
                 updateFirebase(budget, newExpenses);
@@ -154,18 +169,18 @@
 
             return (
                 <div className="max-w-md mx-auto bg-slate-50 min-h-screen pb-32 shadow-2xl flex flex-col relative font-sans overflow-x-hidden">
-                    
+
                     {/* Header */}
                     <div className="bg-indigo-700 text-white px-2 py-3 flex flex-col gap-2 shadow-lg sticky top-0 z-50">
                         <div className="flex justify-between items-center px-2">
-                            <button 
-                                onClick={() => changeMonth(-1)} 
+                            <button
+                                onClick={() => changeMonth(-1)}
                                 className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all"
                             >
                                 <Icon name="chevron-left" size={28} />
                             </button>
-                            
-                            <div 
+
+                            <div
                                 className="flex flex-col items-center cursor-pointer px-4 py-1 rounded-xl hover:bg-white/10 active:scale-95 transition-all"
                                 onClick={() => setShowMonthPicker(!showMonthPicker)}
                             >
@@ -180,8 +195,8 @@
                                 </div>
                             </div>
 
-                            <button 
-                                onClick={() => changeMonth(1)} 
+                            <button
+                                onClick={() => changeMonth(1)}
                                 className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all"
                             >
                                 <Icon name="chevron-right" size={28} />
@@ -193,7 +208,7 @@
                                 {getNearbyMonths().map(m => (
                                     <button
                                         key={m}
-                                        onClick={() => { setCurrentMonth(m); setShowMonthPicker(false); setAnimKey(k => k+1); }}
+                                        onClick={() => { setCurrentMonth(m); setShowMonthPicker(false); setAnimKey(k => k + 1); }}
                                         className={`whitespace-nowrap px-4 py-2 rounded-2xl text-xs font-bold transition-all ${currentMonth === m ? 'bg-white text-indigo-700' : 'bg-indigo-600 text-white/70'}`}
                                     >
                                         {m.split('-')[1]}月
@@ -207,7 +222,7 @@
                         {/* Summary Card */}
                         <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-500 text-white p-8 rounded-b-[3rem] shadow-xl relative overflow-hidden">
                             <div className="absolute -right-8 -top-8 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-                            
+
                             <div className="flex justify-between items-center mb-2">
                                 <p className="text-blue-100 text-sm font-bold opacity-80 uppercase tracking-widest text-shadow">現在の残高</p>
                                 <div className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black uppercase backdrop-blur-md">
@@ -215,17 +230,17 @@
                                 </div>
                             </div>
                             <h1 className="text-5xl font-black mb-6 tracking-tighter tabular-nums drop-shadow-md">¥{balance.toLocaleString()}</h1>
-                            
+
                             <div className="w-full bg-black/20 h-3 rounded-full mb-8 overflow-hidden backdrop-blur-sm border border-white/10 shadow-inner">
-                                <div 
-                                    className={`h-full transition-all duration-1000 ease-out shadow-lg ${spentPercentage > 90 ? 'bg-rose-400' : spentPercentage > 70 ? 'bg-amber-400' : 'bg-emerald-400'}`} 
+                                <div
+                                    className={`h-full transition-all duration-1000 ease-out shadow-lg ${spentPercentage > 90 ? 'bg-rose-400' : spentPercentage > 70 ? 'bg-amber-400' : 'bg-emerald-400'}`}
                                     style={{ width: `${Math.max(0, 100 - spentPercentage)}%` }}
                                 ></div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
-                                <button 
-                                    onClick={() => {setTempBudget(budget); setIsSettingBudget(true)}} 
+                                <button
+                                    onClick={() => { setTempBudget(budget); setIsSettingBudget(true) }}
                                     className="bg-white/10 p-4 rounded-3xl border border-white/10 text-left hover:bg-white/20 active:scale-95 transition-all group"
                                 >
                                     <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1 group-hover:opacity-100">予算設定</p>
@@ -250,23 +265,23 @@
                                     </div>
                                     <div className="relative mb-6">
                                         <span className="absolute left-0 bottom-2 text-3xl font-black text-indigo-500">¥</span>
-                                        <input 
-                                            type="number" 
-                                            className="w-full pl-8 p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none bg-transparent text-slate-800" 
-                                            value={tempBudget} 
-                                            onChange={(e) => setTempBudget(e.target.value)} 
-                                            autoFocus 
+                                        <input
+                                            type="number"
+                                            className="w-full pl-8 p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none bg-transparent text-slate-800"
+                                            value={tempBudget}
+                                            onChange={(e) => setTempBudget(e.target.value)}
+                                            autoFocus
                                         />
                                     </div>
                                     <div className="flex gap-3">
-                                        <button 
-                                            onClick={() => {updateFirebase(Number(tempBudget), expenses); setIsSettingBudget(false)}} 
+                                        <button
+                                            onClick={() => { updateFirebase(Number(tempBudget), expenses); setIsSettingBudget(false) }}
                                             className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-200 active:scale-95 transition-all"
                                         >
                                             保存
                                         </button>
-                                        <button 
-                                            onClick={() => setIsSettingBudget(false)} 
+                                        <button
+                                            onClick={() => setIsSettingBudget(false)}
                                             className="flex-1 bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold active:scale-95 transition-all"
                                         >
                                             戻る
@@ -285,21 +300,21 @@
                                 </div>
                                 <form onSubmit={addExpense} className="space-y-4">
                                     <div className="flex flex-col gap-3">
-                                        <input 
-                                            type="text" 
-                                            placeholder="何に使いましたか？" 
-                                            className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-sm font-bold transition-all border border-transparent focus:border-indigo-100" 
-                                            value={itemName} 
-                                            onChange={(e) => setItemName(e.target.value)} 
+                                        <input
+                                            type="text"
+                                            placeholder="何に使いましたか？"
+                                            className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-sm font-bold transition-all border border-transparent focus:border-indigo-100"
+                                            value={itemName}
+                                            onChange={(e) => setItemName(e.target.value)}
                                         />
                                         <div className="relative">
                                             <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-400">¥</span>
-                                            <input 
-                                                type="number" 
-                                                placeholder="0" 
-                                                className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-xl font-black transition-all border border-transparent focus:border-indigo-100" 
-                                                value={itemAmount} 
-                                                onChange={(e) => setItemAmount(e.target.value)} 
+                                            <input
+                                                type="number"
+                                                placeholder="0"
+                                                className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-xl font-black transition-all border border-transparent focus:border-indigo-100"
+                                                value={itemAmount}
+                                                onChange={(e) => setItemAmount(e.target.value)}
                                             />
                                         </div>
                                     </div>
@@ -319,7 +334,7 @@
                                         {currentMonth.replace('-', ' / ')}
                                     </div>
                                 </div>
-                                
+
                                 {expenses.length === 0 ? (
                                     <div className="text-center py-16 bg-white border-4 border-dashed border-slate-100 rounded-[3rem]">
                                         <p className="text-slate-400 font-bold text-sm tracking-tight px-8">記録がありません</p>
@@ -358,14 +373,14 @@
                                                     </div>
                                                     {/* ALWAYS VISIBLE BUTTONS */}
                                                     <div className="flex border-t border-slate-50 p-2 gap-2 bg-slate-50/50">
-                                                        <button 
-                                                            onClick={() => startEdit(item)} 
+                                                        <button
+                                                            onClick={() => startEdit(item)}
                                                             className="flex-1 flex items-center justify-center gap-2 bg-white text-indigo-600 py-2.5 rounded-[1rem] text-[11px] font-black transition-all border border-slate-200 shadow-sm active:scale-95 active:bg-indigo-50"
                                                         >
                                                             <Icon name="edit-3" size={14} /> 編集
                                                         </button>
-                                                        <button 
-                                                            onClick={() => deleteExpense(item.id)} 
+                                                        <button
+                                                            onClick={() => deleteExpense(item.id)}
                                                             className="flex-1 flex items-center justify-center gap-2 bg-white text-rose-500 py-2.5 rounded-[1rem] text-[11px] font-black transition-all border border-slate-200 shadow-sm active:scale-95 active:bg-rose-50"
                                                         >
                                                             <Icon name="trash-2" size={14} /> 削除
@@ -379,11 +394,11 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     {/* Navigation */}
                     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] bg-slate-900/95 backdrop-blur-xl p-2.5 rounded-[2.5rem] flex justify-around items-center z-50 shadow-2xl shadow-indigo-900/20 border border-white/10">
-                        <button 
-                            onClick={() => { setCurrentMonth(getCurrentMonthStr()); setAnimKey(k => k+1); }}
+                        <button
+                            onClick={() => { setCurrentMonth(getCurrentMonthStr()); setAnimKey(k => k + 1); }}
                             className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-[1.8rem] transition-all ${isThisMonth ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20' : 'text-slate-500 hover:text-white'}`}
                         >
                             <Icon name="home" size={20} />
@@ -408,4 +423,5 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
