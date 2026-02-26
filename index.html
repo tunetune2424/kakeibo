@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>残高管理アプリ</title>
+    <title>残高管理アプリ Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.min.css">
     
+    <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
@@ -19,7 +20,7 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // Firebaseの設定（あなたのプロジェクト専用）
+        // Firebase設定
         const firebaseConfig = {
             apiKey: "AIzaSyBNwBLLxi-LLqdlqSND69rPzuThhj8cijc",
             authDomain: "my-kakeibo-app-1db52.firebaseapp.com",
@@ -52,8 +53,13 @@
             const [itemAmount, setItemAmount] = useState('');
             const [isSettingBudget, setIsSettingBudget] = useState(false);
             const [tempBudget, setTempBudget] = useState('');
+            
+            // 編集用State
+            const [editingId, setEditingId] = useState(null);
+            const [editName, setEditName] = useState('');
+            const [editAmount, setEditAmount] = useState('');
 
-            // クラウドからデータをリアルタイムに読み込む
+            // Firestoreからデータをリアルタイム取得
             useEffect(() => {
                 const unsubscribe = db.collection("months").doc(currentMonth)
                     .onSnapshot((doc) => {
@@ -62,17 +68,13 @@
                             setBudget(data.budget || 0);
                             setExpenses(data.expenses || []);
                         } else {
-                            // データがない場合は初期化
                             setBudget(0);
                             setExpenses([]);
                         }
-                    }, (error) => {
-                        console.error("Firestore Error:", error);
                     });
                 return () => unsubscribe();
             }, [currentMonth]);
 
-            // 保存処理
             const updateFirebase = async (newBudget, newExpenses) => {
                 try {
                     await db.collection("months").doc(currentMonth).set({
@@ -80,7 +82,7 @@
                         expenses: newExpenses
                     });
                 } catch (e) {
-                    alert("保存に失敗しました。Firestoreのルールを確認してください。");
+                    console.error("Firebase Error:", e);
                 }
             };
 
@@ -98,15 +100,32 @@
             };
 
             const deleteExpense = (id) => {
-                const newExpenses = expenses.filter(item => item.id !== id);
+                if (window.confirm("この支出を削除しますか？")) {
+                    const newExpenses = expenses.filter(item => item.id !== id);
+                    updateFirebase(budget, newExpenses);
+                }
+            };
+
+            const startEdit = (item) => {
+                setEditingId(item.id);
+                setEditName(item.name);
+                setEditAmount(item.amount);
+            };
+
+            const saveEdit = () => {
+                if (!editName || !editAmount || Number(editAmount) <= 0) return;
+                const newExpenses = expenses.map(item => 
+                    item.id === editingId ? { ...item, name: editName, amount: Number(editAmount) } : item
+                );
                 updateFirebase(budget, newExpenses);
+                setEditingId(null);
             };
 
             const changeMonth = (offset) => {
                 const [year, month] = currentMonth.split('-').map(Number);
                 const date = new Date(year, month - 1 + offset, 1);
                 setCurrentMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
-                setIsSettingBudget(false);
+                setEditingId(null);
             };
 
             const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
@@ -114,75 +133,147 @@
             const spentPercentage = budget > 0 ? Math.min((totalSpent / budget) * 100, 100) : 0;
 
             return (
-                <div className="max-w-md mx-auto bg-slate-50 min-h-screen pb-24 shadow-2xl flex flex-col relative">
-                    <div className="bg-indigo-700 text-white px-6 py-4 flex justify-between items-center shadow-md">
-                        <button onClick={() => changeMonth(-1)} className="p-2 active:bg-indigo-600 rounded-full"><Icon name="chevron-left" /></button>
-                        <div className="flex items-center gap-2 font-bold text-lg"><Icon name="calendar" size={18} /> {currentMonth.replace('-', '年')}月</div>
-                        <button onClick={() => changeMonth(1)} className="p-2 active:bg-indigo-600 rounded-full"><Icon name="chevron-right" /></button>
+                <div className="max-w-md mx-auto bg-slate-50 min-h-screen pb-24 shadow-2xl flex flex-col relative font-sans">
+                    {/* Header */}
+                    <div className="bg-indigo-700 text-white px-6 py-4 flex justify-between items-center shadow-md sticky top-0 z-40">
+                        <button onClick={() => changeMonth(-1)} className="p-2 active:bg-indigo-600 rounded-full transition-colors"><Icon name="chevron-left" /></button>
+                        <div className="font-bold text-lg flex items-center gap-2">
+                            <Icon name="calendar" size={18} />
+                            {currentMonth.replace('-', ' / ')}
+                        </div>
+                        <button onClick={() => changeMonth(1)} className="p-2 active:bg-indigo-600 rounded-full transition-colors"><Icon name="chevron-right" /></button>
                     </div>
 
-                    <div className="bg-gradient-to-br from-indigo-600 to-blue-500 text-white p-8 rounded-b-[2.5rem] shadow-xl">
+                    {/* Balance Card */}
+                    <div className="bg-gradient-to-br from-indigo-600 to-blue-500 text-white p-8 rounded-b-[2.5rem] shadow-xl relative overflow-hidden">
                         <p className="text-blue-100 text-sm opacity-80 mb-1">現在の残高</p>
-                        <h1 className="text-5xl font-black mb-6">¥{balance.toLocaleString()}</h1>
+                        <h1 className="text-5xl font-black mb-6 tracking-tight">¥{balance.toLocaleString()}</h1>
                         <div className="w-full bg-blue-900/30 h-2.5 rounded-full mb-6 overflow-hidden">
                             <div className={`h-full transition-all duration-700 ${spentPercentage > 90 ? 'bg-red-400' : 'bg-emerald-400'}`} style={{ width: `${Math.max(0, 100 - spentPercentage)}%` }}></div>
                         </div>
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
-                                <p className="text-[10px] uppercase opacity-60 font-bold">予算</p>
+                            <button onClick={() => {setTempBudget(budget); setIsSettingBudget(true)}} className="bg-white/10 p-4 rounded-2xl border border-white/10 text-left active:scale-95 transition-transform">
+                                <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1">予算設定</p>
                                 <p className="text-lg font-bold">¥{budget.toLocaleString()}</p>
-                            </div>
-                            <div className="bg-white/10 p-3 rounded-2xl border border-white/10">
-                                <p className="text-[10px] uppercase opacity-60 font-bold">支出</p>
-                                <p className="text-lg font-bold text-red-100">¥{totalSpent.toLocaleString()}</p>
+                            </button>
+                            <div className="bg-white/10 p-4 rounded-2xl border border-white/10 text-left">
+                                <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1">支出合計</p>
+                                <p className="text-lg font-bold">¥{totalSpent.toLocaleString()}</p>
                             </div>
                         </div>
                     </div>
 
                     <div className="px-6 -mt-5 flex-grow">
-                        {!isSettingBudget ? (
-                            <button onClick={() => {setTempBudget(budget); setIsSettingBudget(true)}} className="w-full mb-6 bg-white border border-slate-200 p-4 rounded-2xl text-slate-600 font-bold shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                                <Icon name="wallet" size={18} className="text-indigo-500" /> 予算を更新
-                            </button>
-                        ) : (
-                            <div className="mb-6 bg-white p-5 rounded-3xl shadow-xl border-2 border-indigo-100">
-                                <label className="text-xs font-black text-slate-400 mb-2 block tracking-widest">今月の予算額</label>
+                        {/* 予算設定パネル */}
+                        {isSettingBudget && (
+                            <div className="mb-6 bg-white p-6 rounded-3xl shadow-xl border-2 border-indigo-100 animate-in fade-in zoom-in duration-300">
+                                <label className="text-xs font-black text-slate-400 mb-2 block tracking-widest uppercase">予算を更新</label>
                                 <input type="number" className="w-full p-2 text-3xl font-black border-b-2 border-indigo-500 outline-none mb-4 bg-transparent" value={tempBudget} onChange={(e) => setTempBudget(e.target.value)} autoFocus />
                                 <div className="flex gap-3">
-                                    <button onClick={() => {updateFirebase(Number(tempBudget), expenses); setIsSettingBudget(false)}} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold">保存</button>
+                                    <button onClick={() => {updateFirebase(Number(tempBudget), expenses); setIsSettingBudget(false)}} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold active:scale-95 transition-transform">保存</button>
                                     <button onClick={() => setIsSettingBudget(false)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold">戻る</button>
                                 </div>
                             </div>
                         )}
 
-                        <div className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 mb-8">
+                        {/* 入力フォーム */}
+                        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 mb-8 mt-8">
+                            <h2 className="text-[10px] font-black text-slate-400 mb-4 flex items-center gap-2 uppercase tracking-widest">新しい記録を追加</h2>
                             <form onSubmit={addExpense} className="space-y-4">
-                                <input type="text" placeholder="項目名" className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-400 text-sm font-bold" value={itemName} onChange={(e) => setItemName(e.target.value)} />
-                                <input type="number" placeholder="金額" className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-400 text-sm font-bold" value={itemAmount} onChange={(e) => setItemAmount(e.target.value)} />
-                                <button className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all">支出を追加</button>
+                                <div className="flex flex-col gap-3">
+                                    <input type="text" placeholder="何に使った？" className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-400 text-sm font-bold transition-all" value={itemName} onChange={(e) => setItemName(e.target.value)} />
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">¥</span>
+                                        <input type="number" placeholder="金額" className="w-full p-4 pl-8 bg-slate-50 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-400 text-sm font-bold transition-all" value={itemAmount} onChange={(e) => setItemAmount(e.target.value)} />
+                                    </div>
+                                </div>
+                                <button className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                                    <Icon name="plus" size={18} /> 支出を記録
+                                </button>
                             </form>
                         </div>
 
-                        <div className="space-y-3 pb-10">
-                            <h2 className="text-[10px] font-black text-slate-400 px-1 uppercase tracking-widest">履歴 ({expenses.length})</h2>
-                            {expenses.map(item => (
-                                <div key={item.id} className="bg-white p-4 rounded-2xl flex justify-between items-center border border-slate-50 shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 bg-indigo-50 text-indigo-500 rounded-xl flex items-center justify-center"><Icon name="receipt" /></div>
-                                        <div><p className="font-bold text-slate-800 text-sm">{item.name}</p><p className="text-[10px] text-slate-400">{item.date}</p></div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <p className="font-black text-slate-800">¥{item.amount.toLocaleString()}</p>
-                                        <button onClick={() => deleteExpense(item.id)} className="text-slate-200 hover:text-red-400"><Icon name="trash-2" size={16} /></button>
-                                    </div>
+                        {/* 履歴リスト */}
+                        <div className="space-y-4 pb-12">
+                            <div className="flex justify-between items-center px-1">
+                                <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">支出の履歴 ({expenses.length})</h2>
+                            </div>
+                            
+                            {expenses.length === 0 ? (
+                                <div className="text-center py-12 bg-white border-2 border-dashed border-slate-200 rounded-3xl">
+                                    <p className="text-slate-300 italic text-sm font-medium">記録がありません</p>
                                 </div>
-                            ))}
+                            ) : (
+                                expenses.map(item => (
+                                    <div key={item.id} className="bg-white rounded-3xl border border-slate-50 shadow-sm transition-all overflow-hidden flex flex-col">
+                                        {editingId === item.id ? (
+                                            /* --- 編集モード表示 --- */
+                                            <div className="p-5 bg-indigo-50/50 space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                                <div className="space-y-2">
+                                                    <input type="text" className="w-full p-3 border-2 border-indigo-200 font-bold text-sm outline-none bg-white rounded-xl" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                                    <input type="number" className="w-full p-3 border-2 border-indigo-200 font-bold text-sm outline-none bg-white rounded-xl" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button onClick={saveEdit} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-xs font-bold active:scale-95 transition-transform">更新を保存</button>
+                                                    <button onClick={() => setEditingId(null)} className="flex-1 bg-white text-slate-500 py-3 rounded-xl text-xs font-bold border border-slate-200">中止</button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            /* --- 通常モード表示 --- */
+                                            <div className="flex flex-col">
+                                                <div className="p-5 flex justify-between items-start">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center shadow-inner">
+                                                            <Icon name="receipt-text" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-slate-800 text-base mb-0.5">{item.name}</p>
+                                                            <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                                                                <Icon name="clock" size={10} /> {item.date}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="font-black text-slate-900 text-xl tracking-tight">¥{item.amount.toLocaleString()}</p>
+                                                    </div>
+                                                </div>
+                                                {/* 操作ボタンエリア */}
+                                                <div className="flex border-t border-slate-50 bg-slate-50/50 p-2 gap-2">
+                                                    <button 
+                                                        onClick={() => startEdit(item)} 
+                                                        className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-indigo-50 text-indigo-600 py-2.5 rounded-xl text-xs font-bold transition-colors border border-slate-100 shadow-sm active:scale-[0.98]"
+                                                    >
+                                                        <Icon name="edit-3" size={14} /> 編集
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => deleteExpense(item.id)} 
+                                                        className="flex-1 flex items-center justify-center gap-2 bg-white hover:bg-rose-50 text-rose-500 py-2.5 rounded-xl text-xs font-bold transition-colors border border-slate-100 shadow-sm active:scale-[0.98]"
+                                                    >
+                                                        <Icon name="trash-2" size={14} /> 削除
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
-
-                    <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-md border-t border-slate-100 p-4 flex justify-around items-center z-30">
-                        <div className="text-indigo-600 flex flex-col items-center gap-1"><Icon name="wallet" /><span className="text-[10px] font-bold">ホーム</span></div>
-                        <div className="text-slate-300 flex flex-col items-center gap-1"><Icon name="calendar" /><span className="text-[10px] font-bold">履歴</span></div>
+                    
+                    {/* フッター */}
+                    <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/95 backdrop-blur-md border-t border-slate-100 p-4 flex justify-around items-center z-30 shadow-2xl">
+                        <div className="text-indigo-600 flex flex-col items-center gap-1 cursor-pointer">
+                            <Icon name="home" size={22} />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">ホーム</span>
+                        </div>
+                        <div className="text-slate-300 flex flex-col items-center gap-1">
+                            <Icon name="bar-chart-3" size={22} />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">履歴</span>
+                        </div>
+                        <div className="text-slate-300 flex flex-col items-center gap-1">
+                            <Icon name="settings" size={22} />
+                            <span className="text-[10px] font-black uppercase tracking-tighter">設定</span>
+                        </div>
                     </div>
                 </div>
             );
