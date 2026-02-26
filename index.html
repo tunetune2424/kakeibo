@@ -81,7 +81,7 @@
             const getNearbyMonths = () => {
                 const months = [];
                 const [year, month] = getCurrentMonthStr().split('-').map(Number);
-                for (let i = -2; i <= 2; i++) {
+                for (let i = 1; i <= 12; i++) {
                     const d = new Date(year, month - 1 + i, 1);
                     months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
                 }
