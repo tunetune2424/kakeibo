@@ -641,6 +641,67 @@
                     )}
 
                     <div className="space-y-6">
+                        {/* カテゴリ別予算の編集（Report画面用） */}
+                        <div className="bg-white p-6 rounded-[3rem] shadow-sm border border-slate-100">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                                    カテゴリ別予算を編集
+                                </h3>
+                            </div>
+                            <div className="space-y-2">
+                                {tags.map(tag => {
+                                    const current = tagBudgets[tag] || 0;
+                                    const isEditing = tagToEditBudget === tag;
+                                    return (
+                                        <div key={tag} className="flex items-center gap-3">
+                                            <div className="flex-1 flex items-center gap-2">
+                                                <span className="text-sm font-black text-slate-700">{tag}</span>
+                                            </div>
+                                            {isEditing ? (
+                                                <>
+                                                    <div className="flex items-center gap-1">
+                                                        <span className="text-xs font-black text-slate-300">¥</span>
+                                                        <input
+                                                            type="number"
+                                                            className="w-24 px-2 py-1 text-right text-sm font-black border-b-2 border-indigo-500 outline-none bg-transparent"
+                                                            value={tempTagBudget}
+                                                            onChange={(e) => setTempTagBudget(e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        onClick={saveTagBudget}
+                                                        className="px-3 py-1.5 text-[11px] font-black rounded-xl bg-indigo-600 text-white active:scale-95 transition-all"
+                                                    >
+                                                        保存
+                                                    </button>
+                                                    <button
+                                                        onClick={() => { setTagToEditBudget(null); setTempTagBudget(''); }}
+                                                        className="px-2 py-1.5 text-[11px] font-bold text-slate-400"
+                                                    >
+                                                        キャンセル
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="text-sm font-black text-slate-500 w-24 text-right tabular-nums">
+                                                        ¥{current.toLocaleString()}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => { setTagToEditBudget(tag); setTempTagBudget(current || ''); }}
+                                                        className="px-3 py-1.5 text-[11px] font-black rounded-xl bg-slate-900 text-white active:scale-95 transition-all"
+                                                    >
+                                                        編集
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* 既存のカテゴリ別分析カード */}
                         {tags.map(tag => {
                             const { spent, budget: tBudget } = tagStats[tag];
                             const percent = tBudget > 0 ? (spent / tBudget) * 100 : 0;
@@ -652,9 +713,6 @@
                                         <div className="flex-grow">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <h3 className="font-black text-slate-800 text-xl leading-none tracking-tight">{tag}</h3>
-                                                <button onClick={(e) => {e.stopPropagation(); setTagToEditBudget(tag); setTempTagBudget(tBudget || '');}} className="p-2 text-slate-300 hover:text-indigo-600 transition-all rounded-full hover:bg-indigo-50">
-                                                    <Icon name="settings-2" size={16} />
-                                                </button>
                                             </div>
                                             <div className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${isOver ? 'text-rose-500' : 'text-slate-400'}`}>
                                                 {isOver ? <Icon name="alert-circle" size={10} /> : <Icon name="check-circle" size={10} />}
@@ -690,22 +748,6 @@
                             <span className="text-xs uppercase tracking-[0.3em]">新規カテゴリ追加</span>
                         </button>
                     </div>
-
-                    {tagToEditBudget && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-6 animate-fade-in">
-                            <div className="bg-white w-full max-w-xs p-8 rounded-[3.5rem] shadow-2xl animate-zoom-in border border-white/20">
-                                <h3 className="text-[11px] font-black text-slate-400 uppercase mb-6 text-center tracking-widest">"{tagToEditBudget}" の月間予算</h3>
-                                <div className="relative mb-8 text-center">
-                                    <span className="text-xl font-black text-slate-300 mr-1">¥</span>
-                                    <input type="number" className="w-3/4 p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none text-center text-slate-800 bg-transparent" value={tempTagBudget} onChange={(e) => setTempTagBudget(e.target.value)} autoFocus />
-                                </div>
-                                <div className="flex flex-col gap-3">
-                                    <button onClick={saveTagBudget} className="bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-100">設定を保存</button>
-                                    <button onClick={() => setTagToEditBudget(null)} className="text-slate-400 py-2 font-black text-[10px] uppercase tracking-widest">閉じる</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                     {isAddingTag && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-6 animate-fade-in">
                             <div className="bg-white w-full max-w-xs p-8 rounded-[3.5rem] shadow-2xl animate-zoom-in border border-white/20">
