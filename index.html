@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -10,41 +9,24 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.min.css">
-
+    
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
     <style>
-        @keyframes fadeInRight {
-            from {
-                opacity: 0;
-                transform: translateX(20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-
-        .animate-month-in {
-            animation: fadeInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .hide-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-
-        body {
-            -webkit-tap-highlight-color: transparent;
-        }
+        .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        body { -webkit-tap-highlight-color: transparent; }
     </style>
 </head>
-
 <body class="bg-slate-50">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
 
         const firebaseConfig = {
             apiKey: "AIzaSyBNwBLLxi-LLqdlqSND69rPzuThhj8cijc",
@@ -55,7 +37,7 @@
             appId: "1:686700068143:web:ab642169bf42364e8f35da",
             measurementId: "G-XYV1JC3RY6"
         };
-
+        
         if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
         }
@@ -71,37 +53,35 @@
                 return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
             };
 
+            const [view, setView] = useState('home'); 
             const [currentMonth, setCurrentMonth] = useState(getCurrentMonthStr());
             const [budget, setBudget] = useState(0);
+            const [tagBudgets, setTagBudgets] = useState({});
             const [expenses, setExpenses] = useState([]);
+            const [tags, setTags] = useState(['食費', '日用品', '交通費', '娯楽']);
+            
+            // 入力用ステート
             const [itemName, setItemName] = useState('');
             const [itemAmount, setItemAmount] = useState('');
+            const [selectedTag, setSelectedTag] = useState('');
+            
+            // モーダル・編集用ステート
             const [isSettingBudget, setIsSettingBudget] = useState(false);
             const [tempBudget, setTempBudget] = useState('');
-            const [showMonthPicker, setShowMonthPicker] = useState(false);
-            const [animKey, setAnimKey] = useState(0);
-
+            
+            // カテゴリ追加・編集モーダル用
+            const [isAddingTag, setIsAddingTag] = useState(false);
+            const [newTagName, setNewTagName] = useState('');
+            const [tagToRename, setTagToRename] = useState(null); // 編集中の元カテゴリ名
+            const [renamedValue, setRenamedValue] = useState(''); // 新しいカテゴリ名入力値
+            
             const [editingId, setEditingId] = useState(null);
             const [editName, setEditName] = useState('');
             const [editAmount, setEditAmount] = useState('');
+            const [editTag, setEditTag] = useState('');
 
-            const changeMonth = (offset) => {
-                const [year, month] = currentMonth.split('-').map(Number);
-                const date = new Date(year, month - 1 + offset, 1);
-                const newMonthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                setCurrentMonth(newMonthStr);
-                setEditingId(null);
-                setAnimKey(prev => prev + 1);
-            };
-
-            const getNearbyMonths = () => {
-                const months = [];
-                const [year] = currentMonth.split('-').map(Number);
-                for (let m = 1; m <= 12; m++) {
-                    months.push(`${year}-${String(m).padStart(2, '0')}`);
-                }
-                return months;
-            };
+            const [tagToEditBudget, setTagToEditBudget] = useState(null);
+            const [tempTagBudget, setTempTagBudget] = useState('');
 
             useEffect(() => {
                 const unsubscribe = db.collection("months").doc(currentMonth)
@@ -110,20 +90,22 @@
                             const data = doc.data();
                             setBudget(data.budget || 0);
                             setExpenses(data.expenses || []);
+                            setTagBudgets(data.tagBudgets || {});
+                            if (data.tags) setTags(data.tags);
                         } else {
                             setBudget(0);
                             setExpenses([]);
+                            setTagBudgets({});
+                            updateFirebase({ tags: ['食費', '日用品', '交通費', '娯楽'] });
                         }
-                    }, (error) => console.error("Firestore Error:", error));
+                    }, (error) => console.error("Firestore error:", error));
                 return () => unsubscribe();
             }, [currentMonth]);
 
-            const updateFirebase = async (newBudget, newExpenses) => {
+            const updateFirebase = async (updates) => {
                 try {
-                    await db.collection("months").doc(currentMonth).set({
-                        budget: Number(newBudget),
-                        expenses: newExpenses
-                    });
+                    const docRef = db.collection("months").doc(currentMonth);
+                    await docRef.set(updates, { merge: true });
                 } catch (e) {
                     console.error("Firebase Error:", e);
                 }
@@ -136,282 +118,441 @@
                     id: Date.now(),
                     name: itemName,
                     amount: Number(itemAmount),
+                    tag: selectedTag || '未分類',
                     date: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                 }, ...expenses];
-                updateFirebase(budget, newExpenses);
-                setItemName(''); setItemAmount('');
-            };
-
-            const deleteExpense = (id) => {
-                const newExpenses = expenses.filter(item => item.id !== id);
-                updateFirebase(budget, newExpenses);
+                updateFirebase({ expenses: newExpenses });
+                setItemName(''); setItemAmount(''); setSelectedTag('');
             };
 
             const startEdit = (item) => {
                 setEditingId(item.id);
                 setEditName(item.name);
                 setEditAmount(item.amount);
+                setEditTag(item.tag);
             };
 
             const saveEdit = () => {
-                if (!editName || !editAmount || Number(editAmount) <= 0) return;
-                const newExpenses = expenses.map(item =>
-                    item.id === editingId ? { ...item, name: editName, amount: Number(editAmount) } : item
+                const newExpenses = expenses.map(exp => 
+                    exp.id === editingId 
+                    ? { ...exp, name: editName, amount: Number(editAmount), tag: editTag }
+                    : exp
                 );
-                updateFirebase(budget, newExpenses);
+                updateFirebase({ expenses: newExpenses });
                 setEditingId(null);
+            };
+
+            const deleteExpense = (id) => {
+                if(confirm("この支出を削除しますか？")) {
+                    const newExpenses = expenses.filter(item => item.id !== id);
+                    updateFirebase({ expenses: newExpenses });
+                }
+            };
+
+            const handleAddTag = () => {
+                if (newTagName && !tags.includes(newTagName)) {
+                    const updatedTags = [...tags, newTagName];
+                    setTags(updatedTags);
+                    updateFirebase({ tags: updatedTags });
+                    setNewTagName('');
+                    setIsAddingTag(false);
+                }
+            };
+
+            const handleRenameTag = () => {
+                const oldName = tagToRename;
+                const newName = renamedValue;
+                
+                if (newName && newName !== oldName) {
+                    const newTags = tags.map(t => t === oldName ? newName : t);
+                    const newExpenses = expenses.map(exp => exp.tag === oldName ? { ...exp, tag: newName } : exp);
+                    const newTagBudgets = { ...tagBudgets };
+                    
+                    if (newTagBudgets[oldName] !== undefined) {
+                        newTagBudgets[newName] = newTagBudgets[oldName];
+                        delete newTagBudgets[oldName];
+                    }
+                    
+                    updateFirebase({ tags: newTags, expenses: newExpenses, tagBudgets: newTagBudgets });
+                }
+                setTagToRename(null);
+                setRenamedValue('');
+            };
+
+            const removeTag = (tagToRemove) => {
+                if (confirm(`カテゴリ「${tagToRemove}」を削除しますか？`)) {
+                    const newTags = tags.filter(t => t !== tagToRemove);
+                    const newExpenses = expenses.map(exp => exp.tag === tagToRemove ? { ...exp, tag: '未分類' } : exp);
+                    const newTagBudgets = { ...tagBudgets };
+                    delete newTagBudgets[tagToRemove];
+                    updateFirebase({ tags: newTags, expenses: newExpenses, tagBudgets: newTagBudgets });
+                }
+            };
+
+            const saveTagBudget = () => {
+                if (tagToEditBudget) {
+                    const newTagBudgets = { ...tagBudgets, [tagToEditBudget]: Number(tempTagBudget) };
+                    updateFirebase({ tagBudgets: newTagBudgets });
+                    setTagToEditBudget(null);
+                    setTempTagBudget('');
+                }
+            };
+
+            const changeMonth = (offset) => {
+                const [year, month] = currentMonth.split('-').map(Number);
+                const date = new Date(year, month - 1 + offset, 1);
+                setCurrentMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
+                setEditingId(null);
+                setTagToEditBudget(null);
+                setIsAddingTag(false);
+                setTagToRename(null);
             };
 
             const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
             const balance = budget - totalSpent;
-            const spentPercentage = budget > 0 ? Math.min((totalSpent / budget) * 100, 100) : 0;
-            const isThisMonth = currentMonth === getCurrentMonthStr();
+            const spentPercentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
 
-            return (
-                <div className="max-w-md mx-auto bg-slate-50 min-h-screen pb-32 shadow-2xl flex flex-col relative font-sans overflow-x-hidden">
+            const tagStats = useMemo(() => {
+                const stats = {};
+                tags.forEach(tag => {
+                    stats[tag] = { spent: 0, budget: tagBudgets[tag] || 0 };
+                });
+                expenses.forEach(exp => {
+                    if (stats[exp.tag]) {
+                        stats[exp.tag].spent += exp.amount;
+                    }
+                });
+                return stats;
+            }, [expenses, tags, tagBudgets]);
 
-                    {/* Header */}
-                    <div className="bg-indigo-700 text-white px-2 py-3 flex flex-col gap-2 shadow-lg sticky top-0 z-50">
-                        <div className="flex justify-between items-center px-2">
-                            <button
-                                onClick={() => changeMonth(-1)}
-                                className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all"
-                            >
-                                <Icon name="chevron-left" size={28} />
-                            </button>
-
-                            <div
-                                className="flex flex-col items-center cursor-pointer px-4 py-1 rounded-xl hover:bg-white/10 active:scale-95 transition-all"
-                                onClick={() => setShowMonthPicker(!showMonthPicker)}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="font-black text-xl tracking-tight">
-                                        {currentMonth.split('-')[0]}年 {currentMonth.split('-')[1]}月
-                                    </span>
-                                    <Icon name={showMonthPicker ? "chevron-up" : "chevron-down"} size={16} className="opacity-60" />
-                                </div>
-                                <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${isThisMonth ? 'bg-emerald-400 text-emerald-900' : 'bg-indigo-500 text-indigo-100'}`}>
-                                    {isThisMonth ? '今月' : '履歴を表示中'}
-                                </div>
+            const renderHome = () => (
+                <div className="animate-slide-in">
+                    <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-500 text-white p-8 rounded-b-[3rem] shadow-xl relative overflow-hidden">
+                        <div className="absolute -right-8 -top-8 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
+                        <div className="flex justify-between items-center mb-2">
+                            <p className="text-blue-100 text-sm font-bold opacity-80 uppercase tracking-widest">現在の残高</p>
+                            <div className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black uppercase backdrop-blur-md">
+                                {spentPercentage.toFixed(0)}% 使用
                             </div>
-
-                            <button
-                                onClick={() => changeMonth(1)}
-                                className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all"
-                            >
-                                <Icon name="chevron-right" size={28} />
-                            </button>
                         </div>
-
-                        {showMonthPicker && (
-                            <div className="flex gap-2 overflow-x-auto px-4 py-2 hide-scrollbar animate-in slide-in-from-top-4 duration-300">
-                                {getNearbyMonths().map(m => (
-                                    <button
-                                        key={m}
-                                        onClick={() => { setCurrentMonth(m); setShowMonthPicker(false); setAnimKey(k => k + 1); }}
-                                        className={`whitespace-nowrap px-4 py-2 rounded-2xl text-xs font-bold transition-all ${currentMonth === m ? 'bg-white text-indigo-700' : 'bg-indigo-600 text-white/70'}`}
-                                    >
-                                        {m.split('-')[1]}月
-                                    </button>
-                                ))}
+                        <h1 className="text-5xl font-black mb-6 tracking-tighter tabular-nums drop-shadow-md">¥{balance.toLocaleString()}</h1>
+                        <div className="w-full bg-black/20 h-3 rounded-full mb-8 overflow-hidden backdrop-blur-sm border border-white/10 shadow-inner">
+                            <div className={`h-full transition-all duration-1000 ease-out shadow-lg ${spentPercentage > 90 ? 'bg-rose-400' : spentPercentage > 70 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${Math.min(100, spentPercentage)}%` }}></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <button onClick={() => {setTempBudget(budget); setIsSettingBudget(true)}} className="bg-white/10 p-4 rounded-3xl border border-white/10 text-left hover:bg-white/20 active:scale-95 transition-all">
+                                <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1">総予算設定</p>
+                                <p className="text-xl font-black">¥{budget.toLocaleString()}</p>
+                            </button>
+                            <div className="bg-white/10 p-4 rounded-3xl border border-white/10 text-left">
+                                <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1">支出合計</p>
+                                <p className="text-xl font-black text-rose-100">¥{totalSpent.toLocaleString()}</p>
                             </div>
-                        )}
+                        </div>
                     </div>
 
-                    <div key={animKey} className="animate-month-in">
-                        {/* Summary Card */}
-                        <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-500 text-white p-8 rounded-b-[3rem] shadow-xl relative overflow-hidden">
-                            <div className="absolute -right-8 -top-8 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-
-                            <div className="flex justify-between items-center mb-2">
-                                <p className="text-blue-100 text-sm font-bold opacity-80 uppercase tracking-widest text-shadow">現在の残高</p>
-                                <div className="bg-white/20 px-3 py-1 rounded-full text-[10px] font-black uppercase backdrop-blur-md">
-                                    {spentPercentage.toFixed(0)}% 使用
+                    <div className="px-6 -mt-6">
+                        {isSettingBudget && (
+                            <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-100 animate-slide-in">
+                                <h3 className="font-black text-slate-700 text-sm uppercase mb-4">総予算を変更</h3>
+                                <input type="number" className="w-full p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none mb-6 text-slate-800" value={tempBudget} onChange={(e) => setTempBudget(e.target.value)} autoFocus />
+                                <div className="flex gap-3">
+                                    <button onClick={() => {updateFirebase({ budget: Number(tempBudget) }); setIsSettingBudget(false)}} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black active:scale-95 transition-all">保存</button>
+                                    <button onClick={() => setIsSettingBudget(false)} className="flex-1 bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold active:scale-95 transition-all">閉じる</button>
                                 </div>
                             </div>
-                            <h1 className="text-5xl font-black mb-6 tracking-tighter tabular-nums drop-shadow-md">¥{balance.toLocaleString()}</h1>
+                        )}
 
-                            <div className="w-full bg-black/20 h-3 rounded-full mb-8 overflow-hidden backdrop-blur-sm border border-white/10 shadow-inner">
-                                <div
-                                    className={`h-full transition-all duration-1000 ease-out shadow-lg ${spentPercentage > 90 ? 'bg-rose-400' : spentPercentage > 70 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                                    style={{ width: `${Math.max(0, 100 - spentPercentage)}%` }}
-                                ></div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <button
-                                    onClick={() => { setTempBudget(budget); setIsSettingBudget(true) }}
-                                    className="bg-white/10 p-4 rounded-3xl border border-white/10 text-left hover:bg-white/20 active:scale-95 transition-all group"
-                                >
-                                    <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1 group-hover:opacity-100">予算設定</p>
-                                    <p className="text-xl font-black">¥{budget.toLocaleString()}</p>
+                        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 mb-8 mt-10">
+                            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">支出を入力</h2>
+                            <form onSubmit={addExpense} className="space-y-4">
+                                <div className="flex flex-col gap-3">
+                                    <input type="text" placeholder="何に使いましたか？" className="w-full p-4 bg-slate-50 rounded-2xl outline-none text-sm font-bold border border-transparent focus:border-indigo-100" value={itemName} onChange={(e) => setItemName(e.target.value)} />
+                                    <input type="number" placeholder="金額" className="w-full p-4 bg-slate-50 rounded-2xl outline-none text-xl font-black border border-transparent focus:border-indigo-100" value={itemAmount} onChange={(e) => setItemAmount(e.target.value)} />
+                                    
+                                    <div className="flex flex-wrap gap-2 py-2">
+                                        {tags.map(tag => (
+                                            <button type="button" key={tag} onClick={() => setSelectedTag(tag === selectedTag ? '' : tag)} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-2 ${selectedTag === tag ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-indigo-200'}`}>
+                                                {tag}
+                                            </button>
+                                        ))}
+                                        <button type="button" onClick={() => {setView('report'); setIsAddingTag(true);}} className="w-8 h-8 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-indigo-100 hover:text-indigo-600 transition-all">
+                                            <Icon name="plus" size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+                                <button className="w-full bg-slate-900 text-white py-4 rounded-[1.5rem] font-black shadow-xl active:scale-95 transition-all">
+                                    支出を追加
                                 </button>
-                                <div className="bg-white/10 p-4 rounded-3xl border border-white/10 text-left">
-                                    <p className="text-[10px] uppercase opacity-60 font-black tracking-widest mb-1">支出合計</p>
-                                    <p className="text-xl font-black text-rose-100">¥{totalSpent.toLocaleString()}</p>
+                            </form>
+                        </div>
+
+                        <div className="space-y-4 pb-12">
+                            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">履歴 ({expenses.length})</h2>
+                            {expenses.map(item => (
+                                <div key={item.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col group transition-all">
+                                    {editingId === item.id ? (
+                                        <div className="p-5 bg-indigo-50/50 space-y-4 animate-slide-in">
+                                            <div className="space-y-2">
+                                                <input type="text" className="w-full p-3 bg-white rounded-xl border border-indigo-200 outline-none font-bold text-sm" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                                <input type="number" className="w-full p-3 bg-white rounded-xl border border-indigo-200 outline-none font-black text-lg" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
+                                                <div className="flex flex-wrap gap-2 pt-1">
+                                                    {tags.map(t => (
+                                                        <button key={t} onClick={() => setEditTag(t)} className={`px-3 py-1.5 rounded-lg text-[10px] font-black border transition-all ${editTag === t ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
+                                                            {t}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={saveEdit} className="flex-[2] bg-indigo-600 text-white py-3 rounded-xl font-black text-xs">保存</button>
+                                                <button onClick={() => setEditingId(null)} className="flex-1 bg-white text-slate-400 py-3 rounded-xl font-bold text-xs border border-slate-200">キャンセル</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="p-5">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-2xl flex items-center justify-center">
+                                                        <Icon name="receipt" size={20} />
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-black text-slate-800 text-base leading-tight mb-1">{item.name}</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{item.tag}</span>
+                                                            <span className="text-[10px] text-slate-400 font-bold">{item.date}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <p className="font-black text-slate-900 text-xl tracking-tighter tabular-nums">¥{item.amount.toLocaleString()}</p>
+                                            </div>
+                                            <div className="flex gap-2 pt-2 border-t border-slate-50">
+                                                <button onClick={() => startEdit(item)} className="flex-1 flex items-center justify-center gap-2 text-[11px] font-black text-indigo-600 bg-white border border-indigo-100 py-2.5 rounded-xl active:bg-indigo-50 transition-colors">
+                                                    <Icon name="edit-3" size={14} /> 編集
+                                                </button>
+                                                <button onClick={() => deleteExpense(item.id)} className="flex-1 flex items-center justify-center gap-2 text-[11px] font-black text-rose-500 bg-white border border-rose-100 py-2.5 rounded-xl active:bg-rose-50 transition-colors">
+                                                    <Icon name="trash-2" size={14} /> 削除
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const renderReport = () => (
+                <div className="animate-slide-in px-6 pt-6 pb-24">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h2 className="text-2xl font-black text-slate-800 tracking-tighter">分析レポート</h2>
+                            <p className="text-xs font-bold text-slate-400">カテゴリごとの予算と支出を管理</p>
+                        </div>
+                        <div className="text-[10px] font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full uppercase">{currentMonth}</div>
+                    </div>
+
+                    {/* 予算設定モーダル */}
+                    {tagToEditBudget && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-200">
+                            <div className="bg-white w-full max-w-xs p-8 rounded-[3rem] shadow-2xl animate-slide-in">
+                                <h3 className="text-sm font-black text-slate-400 uppercase mb-4 tracking-widest text-center">
+                                    {tagToEditBudget}の予算
+                                </h3>
+                                <input 
+                                    type="number" 
+                                    className="w-full p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none mb-8 text-center text-slate-800"
+                                    value={tempTagBudget}
+                                    onChange={(e) => setTempTagBudget(e.target.value)}
+                                    autoFocus
+                                />
+                                <div className="flex flex-col gap-3">
+                                    <button onClick={saveTagBudget} className="bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-200 active:scale-95 transition-all">
+                                        予算を保存
+                                    </button>
+                                    <button onClick={() => setTagToEditBudget(null)} className="text-slate-400 py-2 font-bold text-xs uppercase tracking-widest">
+                                        キャンセル
+                                    </button>
                                 </div>
                             </div>
                         </div>
+                    )}
 
-                        <div className="px-6 -mt-6">
-                            {/* Budget Edit Panel */}
-                            {isSettingBudget && (
-                                <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-100 animate-in zoom-in duration-300">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center">
-                                            <Icon name="pencil" size={14} />
-                                        </div>
-                                        <h3 className="font-black text-slate-700 text-sm uppercase">予算を変更</h3>
-                                    </div>
-                                    <div className="relative mb-6">
-                                        <span className="absolute left-0 bottom-2 text-3xl font-black text-indigo-500">¥</span>
-                                        <input
-                                            type="number"
-                                            className="w-full pl-8 p-2 text-4xl font-black border-b-4 border-indigo-500 outline-none bg-transparent text-slate-800"
-                                            value={tempBudget}
-                                            onChange={(e) => setTempBudget(e.target.value)}
-                                            autoFocus
-                                        />
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <button
-                                            onClick={() => { updateFirebase(Number(tempBudget), expenses); setIsSettingBudget(false) }}
-                                            className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-200 active:scale-95 transition-all"
-                                        >
-                                            保存
-                                        </button>
-                                        <button
-                                            onClick={() => setIsSettingBudget(false)}
-                                            className="flex-1 bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold active:scale-95 transition-all"
-                                        >
-                                            戻る
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Add Expense Form */}
-                            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 mb-8 mt-10">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                        {currentMonth.split('-')[1]}月の支出を入力
-                                    </h2>
-                                    <Icon name="zap" size={14} className="text-amber-400" />
-                                </div>
-                                <form onSubmit={addExpense} className="space-y-4">
-                                    <div className="flex flex-col gap-3">
-                                        <input
-                                            type="text"
-                                            placeholder="何に使いましたか？"
-                                            className="w-full p-4 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-sm font-bold transition-all border border-transparent focus:border-indigo-100"
-                                            value={itemName}
-                                            onChange={(e) => setItemName(e.target.value)}
-                                        />
-                                        <div className="relative">
-                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-400">¥</span>
-                                            <input
-                                                type="number"
-                                                placeholder="0"
-                                                className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-500/10 text-xl font-black transition-all border border-transparent focus:border-indigo-100"
-                                                value={itemAmount}
-                                                onChange={(e) => setItemAmount(e.target.value)}
-                                            />
-                                        </div>
-                                    </div>
-                                    <button className="w-full bg-slate-900 text-white py-4 rounded-[1.5rem] font-black shadow-xl shadow-slate-200 active:scale-[0.97] transition-all flex items-center justify-center gap-3">
-                                        支出を追加
+                    {/* カテゴリ追加モーダル */}
+                    {isAddingTag && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-200">
+                            <div className="bg-white w-full max-w-xs p-8 rounded-[3rem] shadow-2xl animate-slide-in">
+                                <h3 className="text-sm font-black text-slate-400 uppercase mb-4 tracking-widest text-center">
+                                    新しいカテゴリ
+                                </h3>
+                                <input 
+                                    type="text" 
+                                    placeholder="例: サブスク"
+                                    className="w-full p-2 text-2xl font-black border-b-4 border-indigo-500 outline-none mb-8 text-center text-slate-800"
+                                    value={newTagName}
+                                    onChange={(e) => setNewTagName(e.target.value)}
+                                    autoFocus
+                                />
+                                <div className="flex flex-col gap-3">
+                                    <button onClick={handleAddTag} className="bg-slate-900 text-white py-4 rounded-2xl font-black shadow-lg active:scale-95 transition-all">
+                                        追加する
                                     </button>
-                                </form>
-                            </div>
-
-                            {/* History List */}
-                            <div className="space-y-4 pb-12">
-                                <div className="flex justify-between items-center px-1">
-                                    <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                        履歴 ({expenses.length})
-                                    </h2>
-                                    <div className="text-[10px] font-bold text-slate-400 italic">
-                                        {currentMonth.replace('-', ' / ')}
-                                    </div>
+                                    <button onClick={() => setIsAddingTag(false)} className="text-slate-400 py-2 font-bold text-xs uppercase tracking-widest">
+                                        キャンセル
+                                    </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
 
-                                {expenses.length === 0 ? (
-                                    <div className="text-center py-16 bg-white border-4 border-dashed border-slate-100 rounded-[3rem]">
-                                        <p className="text-slate-400 font-bold text-sm tracking-tight px-8">記録がありません</p>
+                    {/* カテゴリ名編集モーダル */}
+                    {tagToRename && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-200">
+                            <div className="bg-white w-full max-w-xs p-8 rounded-[3rem] shadow-2xl animate-slide-in">
+                                <h3 className="text-sm font-black text-slate-400 uppercase mb-4 tracking-widest text-center">
+                                    カテゴリ名を変更
+                                </h3>
+                                <input 
+                                    type="text" 
+                                    className="w-full p-2 text-2xl font-black border-b-4 border-indigo-500 outline-none mb-8 text-center text-slate-800"
+                                    value={renamedValue}
+                                    onChange={(e) => setRenamedValue(e.target.value)}
+                                    autoFocus
+                                />
+                                <div className="flex flex-col gap-3">
+                                    <button onClick={handleRenameTag} className="bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-200 active:scale-95 transition-all">
+                                        名前を保存
+                                    </button>
+                                    <button onClick={() => {setTagToRename(null); setRenamedValue('');}} className="text-slate-400 py-2 font-bold text-xs uppercase tracking-widest">
+                                        キャンセル
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="space-y-6">
+                        {tags.map(tag => {
+                            const { spent, budget: tBudget } = tagStats[tag];
+                            const percent = tBudget > 0 ? (spent / tBudget) * 100 : 0;
+                            const isOver = spent > tBudget && tBudget > 0;
+
+                            return (
+                                <div key={tag} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex-grow">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h3 className="font-black text-slate-800 text-lg leading-none">{tag}</h3>
+                                                <button 
+                                                    onClick={() => {
+                                                        setTagToRename(tag);
+                                                        setRenamedValue(tag);
+                                                    }} 
+                                                    className="p-1.5 text-slate-300 hover:text-indigo-600 transition-all rounded-full hover:bg-indigo-50"
+                                                >
+                                                    <Icon name="edit-2" size={14} />
+                                                </button>
+                                                <button onClick={() => removeTag(tag)} className="p-1.5 text-slate-200 hover:text-rose-500 transition-all rounded-full hover:bg-rose-50">
+                                                    <Icon name="trash-2" size={14} />
+                                                </button>
+                                            </div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                                {tBudget > 0 
+                                                    ? (isOver ? `予算を ¥${(spent - tBudget).toLocaleString()} 超過` : `残り ¥${(tBudget - spent).toLocaleString()}`) 
+                                                    : '予算未設定'}
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col items-end gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    setTagToEditBudget(tag);
+                                                    setTempTagBudget(tBudget || '');
+                                                }}
+                                                className="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition-all shadow-md active:scale-95 flex items-center gap-2"
+                                            >
+                                                <Icon name="settings-2" size={12} />
+                                                予算を設定
+                                            </button>
+                                        </div>
                                     </div>
-                                ) : (
-                                    expenses.map(item => (
-                                        <div key={item.id} className="bg-white rounded-[2rem] border border-slate-100 shadow-sm transition-all overflow-hidden flex flex-col group">
-                                            {editingId === item.id ? (
-                                                <div className="p-5 bg-indigo-50 space-y-4">
-                                                    <div className="space-y-2">
-                                                        <input type="text" className="w-full p-3 border-2 border-indigo-200 font-bold text-sm outline-none bg-white rounded-xl" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                                                        <input type="number" className="w-full p-3 border-2 border-indigo-200 font-bold text-sm outline-none bg-white rounded-xl" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button onClick={saveEdit} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl text-xs font-bold active:scale-95 transition-all shadow-md">保存</button>
-                                                        <button onClick={() => setEditingId(null)} className="flex-1 bg-white text-slate-500 py-3 rounded-xl text-xs font-bold border border-slate-200">閉じる</button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col">
-                                                    <div className="p-5 flex justify-between items-center">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="w-12 h-12 bg-slate-50 text-indigo-500 rounded-2xl flex items-center justify-center shadow-sm">
-                                                                <Icon name="shopping-bag" size={20} />
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-black text-slate-800 text-base leading-tight mb-1">{item.name}</p>
-                                                                <p className="text-[10px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded-md inline-block">
-                                                                    {item.date}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-right">
-                                                            <p className="font-black text-slate-900 text-xl tracking-tighter tabular-nums">¥{item.amount.toLocaleString()}</p>
-                                                        </div>
-                                                    </div>
-                                                    {/* ALWAYS VISIBLE BUTTONS */}
-                                                    <div className="flex border-t border-slate-50 p-2 gap-2 bg-slate-50/50">
-                                                        <button
-                                                            onClick={() => startEdit(item)}
-                                                            className="flex-1 flex items-center justify-center gap-2 bg-white text-indigo-600 py-2.5 rounded-[1rem] text-[11px] font-black transition-all border border-slate-200 shadow-sm active:scale-95 active:bg-indigo-50"
-                                                        >
-                                                            <Icon name="edit-3" size={14} /> 編集
-                                                        </button>
-                                                        <button
-                                                            onClick={() => deleteExpense(item.id)}
-                                                            className="flex-1 flex items-center justify-center gap-2 bg-white text-rose-500 py-2.5 rounded-[1rem] text-[11px] font-black transition-all border border-slate-200 shadow-sm active:scale-95 active:bg-rose-50"
-                                                        >
-                                                            <Icon name="trash-2" size={14} /> 削除
-                                                        </button>
-                                                    </div>
+
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between items-end tabular-nums">
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase mb-0.5">支出</span>
+                                                <span className={`text-xl font-black ${isOver ? 'text-rose-500' : 'text-slate-800'}`}>¥{spent.toLocaleString()}</span>
+                                            </div>
+                                            <div className="flex flex-col items-end">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase mb-0.5">予算</span>
+                                                <span className="text-sm font-bold text-slate-600">¥{tBudget.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="relative pt-1">
+                                            <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden border border-slate-50 shadow-inner">
+                                                <div 
+                                                    className={`h-full transition-all duration-1000 ease-out ${isOver ? 'bg-gradient-to-r from-rose-400 to-rose-600' : percent > 85 ? 'bg-gradient-to-r from-amber-400 to-amber-500' : 'bg-gradient-to-r from-indigo-500 to-blue-600'}`} 
+                                                    style={{ width: `${Math.min(100, percent)}%` }}
+                                                ></div>
+                                            </div>
+                                            {tBudget > 0 && (
+                                                <div className="flex justify-end mt-1">
+                                                    <span className={`text-[10px] font-black ${isOver ? 'text-rose-500' : 'text-slate-400'}`}>
+                                                        {percent.toFixed(0)}% 使用済
+                                                    </span>
                                                 </div>
                                             )}
                                         </div>
-                                    ))
-                                )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        
+                        <button onClick={() => setIsAddingTag(true)} className="w-full py-8 border-4 border-dashed border-slate-100 rounded-[2.5rem] text-slate-400 font-black flex flex-col items-center gap-2 hover:bg-slate-50 hover:border-indigo-100 hover:text-indigo-400 transition-all group">
+                            <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-indigo-50">
+                                <Icon name="plus" size={24} />
                             </div>
+                            <span className="text-xs uppercase tracking-widest">新しいカテゴリを追加</span>
+                        </button>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl flex flex-col relative font-sans overflow-x-hidden pb-24">
+                    <div className="bg-indigo-700 text-white px-2 py-3 flex flex-col gap-2 shadow-lg sticky top-0 z-50">
+                        <div className="flex justify-between items-center px-2">
+                            <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all">
+                                <Icon name="chevron-left" size={28} />
+                            </button>
+                            <div className="flex flex-col items-center">
+                                <span className="font-black text-xl tracking-tight">{currentMonth.split('-')[0]}年 {currentMonth.split('-')[1]}月</span>
+                                <div className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-emerald-400 text-emerald-900">
+                                    {view === 'home' ? 'HOME' : 'ANALYSIS'}
+                                </div>
+                            </div>
+                            <button onClick={() => changeMonth(1)} className="p-2 hover:bg-white/20 active:scale-90 rounded-full transition-all">
+                                <Icon name="chevron-right" size={28} />
+                            </button>
                         </div>
                     </div>
 
-                    {/* Navigation */}
-                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] bg-slate-900/95 backdrop-blur-xl p-2.5 rounded-[2.5rem] flex justify-around items-center z-50 shadow-2xl shadow-indigo-900/20 border border-white/10">
-                        <button
-                            onClick={() => { setCurrentMonth(getCurrentMonthStr()); setAnimKey(k => k + 1); }}
-                            className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-[1.8rem] transition-all ${isThisMonth ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-500/20' : 'text-slate-500 hover:text-white'}`}
-                        >
+                    <div className="flex-grow">
+                        {view === 'home' ? renderHome() : renderReport()}
+                    </div>
+                    
+                    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-[400px] bg-slate-900/95 backdrop-blur-xl p-2.5 rounded-[2.5rem] flex justify-around items-center z-50 shadow-2xl border border-white/10">
+                        <button onClick={() => setView('home')} className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-[1.8rem] transition-all ${view === 'home' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
                             <Icon name="home" size={20} />
                             <span className="text-[9px] font-black uppercase tracking-widest">ホーム</span>
                         </button>
-                        <div className="w-px h-6 bg-white/10"></div>
-                        <button className="flex-1 flex flex-col items-center gap-1.5 py-3 text-slate-600 opacity-50 cursor-not-allowed">
+                        <button onClick={() => setView('report')} className={`flex-1 flex flex-col items-center gap-1.5 py-3 rounded-[1.8rem] transition-all ${view === 'report' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
                             <Icon name="pie-chart" size={20} />
                             <span className="text-[9px] font-black uppercase tracking-widest">分析</span>
                         </button>
-                        <div className="w-px h-6 bg-white/10"></div>
                         <button className="flex-1 flex flex-col items-center gap-1.5 py-3 text-slate-600 opacity-50 cursor-not-allowed">
-                            <Icon name="user" size={20} />
+                            <Icon name="settings" size={20} />
                             <span className="text-[9px] font-black uppercase tracking-widest">設定</span>
                         </button>
                     </div>
@@ -423,5 +564,4 @@
         root.render(<App />);
     </script>
 </body>
-
 </html>
