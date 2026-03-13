@@ -46,7 +46,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         // Firebase設定
         const firebaseConfig = {
@@ -63,6 +63,7 @@
             firebase.initializeApp(firebaseConfig);
         }
         const db = firebase.firestore();
+        const { FieldValue } = firebase.firestore;
 
         const Icon = ({ name, size = 20, className = "" }) => (
             <i className={`lucide-${name} ${className}`} style={{ fontSize: size, width: size, height: size }}></i>
@@ -100,25 +101,86 @@
             const [tagToEditBudget, setTagToEditBudget] = useState(null);
             const [tempTagBudget, setTempTagBudget] = useState('');
             const [selectedTagDetail, setSelectedTagDetail] = useState(null);
+            const [isMigrating, setIsMigrating] = useState(false);
+            const [undoToast, setUndoToast] = useState(null);
+
+            const itemNameInputRef = useRef(null);
+            const itemAmountInputRef = useRef(null);
+            const undoTimerRef = useRef(null);
 
             // データの読み込み
             useEffect(() => {
-                const unsubscribe = db.collection("months").doc(currentMonth)
-                    .onSnapshot((doc) => {
-                        if (doc.exists) {
-                            const data = doc.data();
-                            setBudget(data.budget || 0);
-                            setExpenses(data.expenses || []);
-                            setTagBudgets(data.tagBudgets || {});
-                            if (data.tags) setTags(data.tags);
-                        } else {
-                            setBudget(0);
-                            setExpenses([]);
-                            setTagBudgets({});
-                            updateFirebase({ tags: ['食費', '日用品', '交通費', '娯楽'] });
+                let isCancelled = false;
+                const monthRef = db.collection("months").doc(currentMonth);
+
+                const unsubscribeMonth = monthRef.onSnapshot(async (doc) => {
+                    if (isCancelled) return;
+
+                    if (doc.exists) {
+                        const data = doc.data() || {};
+                        setBudget(Number(data.budget || 0));
+                        setTagBudgets(data.tagBudgets || {});
+                        if (data.tags) setTags(data.tags);
+
+                        // 旧形式 (months/{YYYY-MM}.expenses = []) の自動移行（1回だけ）
+                        if (!isMigrating && Array.isArray(data.expenses) && data.expenses.length > 0 && !data.migratedToSubcollection) {
+                            setIsMigrating(true);
+                            try {
+                                const batch = db.batch();
+                                const expensesCol = monthRef.collection("expenses");
+                                data.expenses.forEach((item) => {
+                                    const name = (item?.name ?? "").toString();
+                                    const amount = Number(item?.amount ?? 0);
+                                    const tag = (item?.tag ?? "未分類").toString();
+                                    const createdAtMillis =
+                                        typeof item?.createdAtMillis === "number"
+                                            ? item.createdAtMillis
+                                            : (typeof item?.id === "number" ? item.id : Date.now());
+                                    const dateStr = item?.date ? String(item.date) : null;
+
+                                    const docRef = expensesCol.doc(); // auto id
+                                    batch.set(docRef, {
+                                        name,
+                                        amount,
+                                        tag,
+                                        createdAtMillis,
+                                        createdAt: FieldValue.serverTimestamp(),
+                                        ...(dateStr ? { legacyDateStr: dateStr } : {})
+                                    });
+                                });
+                                batch.set(monthRef, {
+                                    migratedToSubcollection: true,
+                                    migratedAt: FieldValue.serverTimestamp(),
+                                    expenses: FieldValue.delete()
+                                }, { merge: true });
+                                await batch.commit();
+                            } catch (e) {
+                                console.error("Migration Error:", e);
+                            } finally {
+                                if (!isCancelled) setIsMigrating(false);
+                            }
                         }
+                    } else {
+                        setBudget(0);
+                        setTagBudgets({});
+                        updateFirebase({ tags: ['食費', '日用品', '交通費', '娯楽'] });
+                    }
+                }, (error) => console.error("Firestore error:", error));
+
+                const unsubscribeExpenses = monthRef
+                    .collection("expenses")
+                    .orderBy("createdAtMillis", "desc")
+                    .onSnapshot((snapshot) => {
+                        if (isCancelled) return;
+                        const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                        setExpenses(list);
                     }, (error) => console.error("Firestore error:", error));
-                return () => unsubscribe();
+
+                return () => {
+                    isCancelled = true;
+                    unsubscribeMonth();
+                    unsubscribeExpenses();
+                };
             }, [currentMonth]);
 
             const updateFirebase = async (updates) => {
@@ -152,24 +214,85 @@
                 setIsMonthPickerOpen(false);
             };
 
-            const addExpense = (e) => {
-                e.preventDefault();
-                if (!itemName || !itemAmount || Number(itemAmount) <= 0) return;
-                const newExpenses = [{
-                    id: Date.now(),
-                    name: itemName,
-                    amount: Number(itemAmount),
-                    tag: selectedTag || '未分類',
-                    date: new Date().toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                }, ...expenses];
-                updateFirebase({ expenses: newExpenses });
-                setItemName(''); setItemAmount(''); setSelectedTag('');
+            const tagColor = (tag) => {
+                const palettes = [
+                    { bg: 'bg-indigo-600', text: 'text-white', border: 'border-indigo-200', softBg: 'bg-indigo-50', softText: 'text-indigo-700' },
+                    { bg: 'bg-emerald-600', text: 'text-white', border: 'border-emerald-200', softBg: 'bg-emerald-50', softText: 'text-emerald-700' },
+                    { bg: 'bg-amber-500', text: 'text-white', border: 'border-amber-200', softBg: 'bg-amber-50', softText: 'text-amber-700' },
+                    { bg: 'bg-rose-600', text: 'text-white', border: 'border-rose-200', softBg: 'bg-rose-50', softText: 'text-rose-700' },
+                    { bg: 'bg-sky-600', text: 'text-white', border: 'border-sky-200', softBg: 'bg-sky-50', softText: 'text-sky-700' },
+                    { bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-200', softBg: 'bg-violet-50', softText: 'text-violet-700' },
+                    { bg: 'bg-teal-600', text: 'text-white', border: 'border-teal-200', softBg: 'bg-teal-50', softText: 'text-teal-700' },
+                    { bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-200', softBg: 'bg-fuchsia-50', softText: 'text-fuchsia-700' }
+                ];
+                const s = (tag || '未分類').toString();
+                let hash = 0;
+                for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+                return palettes[hash % palettes.length];
             };
 
-            const deleteExpense = (id) => {
-                if(confirm("この支出を削除しますか？")) {
-                    const newExpenses = expenses.filter(item => item.id !== id);
-                    updateFirebase({ expenses: newExpenses });
+            const addExpense = async (e) => {
+                e.preventDefault();
+                if (!itemName || !itemAmount || Number(itemAmount) <= 0) return;
+                try {
+                    const monthRef = db.collection("months").doc(currentMonth);
+                    const expenseRef = monthRef.collection("expenses").doc();
+                    await expenseRef.set({
+                        name: itemName,
+                        amount: Number(itemAmount),
+                        tag: selectedTag || '未分類',
+                        createdAtMillis: Date.now(),
+                        createdAt: FieldValue.serverTimestamp()
+                    });
+                    setItemName(''); setItemAmount(''); setSelectedTag('');
+                    requestAnimationFrame(() => {
+                        itemNameInputRef.current?.focus?.();
+                    });
+                } catch (e2) {
+                    console.error("Firebase Error:", e2);
+                }
+            };
+
+            const deleteExpense = async (id) => {
+                if (!confirm("この支出を削除しますか？")) return;
+                try {
+                    const monthRef = db.collection("months").doc(currentMonth);
+                    const docRef = monthRef.collection("expenses").doc(id);
+                    const snap = await docRef.get();
+                    if (!snap.exists) return;
+                    const deletedData = snap.data();
+                    await docRef.delete();
+
+                    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+                    setUndoToast({
+                        month: currentMonth,
+                        id,
+                        data: deletedData,
+                        label: deletedData?.name ? String(deletedData.name) : '支出'
+                    });
+                    undoTimerRef.current = setTimeout(() => {
+                        setUndoToast(null);
+                        undoTimerRef.current = null;
+                    }, 5000);
+                } catch (e) {
+                    console.error("Firebase Error:", e);
+                }
+            };
+
+            const undoDelete = async () => {
+                if (!undoToast) return;
+                try {
+                    const monthRef = db.collection("months").doc(undoToast.month);
+                    await monthRef.collection("expenses").doc(undoToast.id).set({
+                        ...undoToast.data,
+                        restoredAt: FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (e) {
+                    console.error("Firebase Error:", e);
+                } finally {
+                    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+                    undoTimerRef.current = null;
+                    setUndoToast(null);
                 }
             };
 
@@ -180,14 +303,18 @@
                 setEditTag(item.tag);
             };
 
-            const saveEdit = () => {
-                const newExpenses = expenses.map(exp => 
-                    exp.id === editingId 
-                    ? { ...exp, name: editName, amount: Number(editAmount), tag: editTag }
-                    : exp
-                );
-                updateFirebase({ expenses: newExpenses });
-                setEditingId(null);
+            const saveEdit = async () => {
+                try {
+                    await db.collection("months").doc(currentMonth).collection("expenses").doc(editingId).set({
+                        name: editName,
+                        amount: Number(editAmount),
+                        tag: editTag,
+                        updatedAt: FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    setEditingId(null);
+                } catch (e) {
+                    console.error("Firebase Error:", e);
+                }
             };
 
             const saveTagBudget = () => {
@@ -212,6 +339,21 @@
             const totalSpent = expenses.reduce((sum, item) => sum + item.amount, 0);
             const balance = budget - totalSpent;
             const spentPercentage = budget > 0 ? (totalSpent / budget) * 100 : 0;
+
+            const canSubmitExpense = itemName.trim().length > 0 && Number(itemAmount) > 0;
+            const formatExpenseDate = (item) => {
+                if (typeof item?.createdAtMillis === 'number') {
+                    return new Date(item.createdAtMillis).toLocaleString('ja-JP', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+                if (item?.legacyDateStr) return String(item.legacyDateStr);
+                if (item?.date) return String(item.date);
+                return '';
+            };
 
             const tagStats = useMemo(() => {
                 const stats = {};
@@ -303,22 +445,63 @@
                                 <div className="space-y-4">
                                     <div className="relative">
                                         <Icon name="edit-3" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-                                        <input type="text" placeholder="品目（例: 昼食代）" className="w-full p-4 pl-11 bg-slate-50 rounded-2xl outline-none text-sm font-bold border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all" value={itemName} onChange={(e) => setItemName(e.target.value)} />
+                                        <input
+                                            ref={itemNameInputRef}
+                                            type="text"
+                                            placeholder="品目（例: 昼食代）"
+                                            className="w-full p-4 pl-11 bg-slate-50 rounded-2xl outline-none text-sm font-bold border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all"
+                                            value={itemName}
+                                            onChange={(e) => setItemName(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && (!itemAmount || Number(itemAmount) <= 0)) {
+                                                    e.preventDefault();
+                                                    itemAmountInputRef.current?.focus?.();
+                                                }
+                                            }}
+                                        />
                                     </div>
                                     <div className="relative">
                                         <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-300 text-lg">¥</span>
-                                        <input type="number" placeholder="金額" className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none text-2xl font-black border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all tabular-nums" value={itemAmount} onChange={(e) => setItemAmount(e.target.value)} />
+                                        <input
+                                            ref={itemAmountInputRef}
+                                            type="number"
+                                            placeholder="金額"
+                                            className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none text-2xl font-black border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all tabular-nums"
+                                            value={itemAmount}
+                                            onChange={(e) => setItemAmount(e.target.value)}
+                                        />
                                     </div>
                                     
                                     <div className="flex flex-wrap gap-2 pt-2">
                                         {tags.map(tag => (
-                                            <button type="button" key={tag} onClick={() => setSelectedTag(tag === selectedTag ? '' : tag)} className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all border-2 ${selectedTag === tag ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400 hover:border-indigo-100'}`}>
+                                            <button
+                                                type="button"
+                                                key={tag}
+                                                onClick={() => setSelectedTag(tag === selectedTag ? '' : tag)}
+                                                className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all border-2 ${
+                                                    selectedTag === tag
+                                                        ? `${tagColor(tag).bg} ${tagColor(tag).text} shadow-md border-white/20`
+                                                        : `bg-white border-slate-100 text-slate-400 hover:${tagColor(tag).softBg} hover:${tagColor(tag).softText} hover:border-slate-200`
+                                                }`}
+                                            >
                                                 {tag}
                                             </button>
                                         ))}
                                     </div>
                                 </div>
-                                <button className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black shadow-xl active:scale-[0.97] transition-all flex items-center justify-center gap-3">
+                                {!canSubmitExpense && (itemName.trim().length > 0 || itemAmount.length > 0) && (
+                                    <div className="text-[11px] font-black text-rose-500 bg-rose-50 border border-rose-100 rounded-2xl px-4 py-3">
+                                        品目と金額（1円以上）を入力してください
+                                    </div>
+                                )}
+                                <button
+                                    disabled={!canSubmitExpense}
+                                    className={`w-full py-5 rounded-3xl font-black shadow-xl transition-all flex items-center justify-center gap-3 ${
+                                        canSubmitExpense
+                                            ? 'bg-slate-900 text-white active:scale-[0.97]'
+                                            : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                    }`}
+                                >
                                     <Icon name="plus-circle" size={20} /> 記録を保存
                                 </button>
                             </form>
@@ -352,7 +535,11 @@
                                                                 type="button" 
                                                                 key={tag} 
                                                                 onClick={() => setEditTag(tag)} 
-                                                                className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all border-2 ${editTag === tag ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-400'}`}
+                                                                className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all border-2 ${
+                                                                    editTag === tag
+                                                                        ? `${tagColor(tag).bg} ${tagColor(tag).text} shadow-sm border-white/20`
+                                                                        : `bg-white border-slate-200 text-slate-400 hover:${tagColor(tag).softBg} hover:${tagColor(tag).softText}`
+                                                                }`}
                                                             >
                                                                 {tag}
                                                             </button>
@@ -374,8 +561,8 @@
                                                         <div>
                                                             <p className="font-black text-slate-800 text-lg leading-tight mb-1.5">{item.name}</p>
                                                             <div className="flex items-center gap-2">
-                                                                <span className="text-[10px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded-md uppercase tracking-wider">{item.tag}</span>
-                                                                <span className="text-[10px] text-slate-400 font-bold tracking-tighter uppercase">{item.date}</span>
+                                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${tagColor(item.tag).bg} ${tagColor(item.tag).text}`}>{item.tag}</span>
+                                                                <span className="text-[10px] text-slate-400 font-bold tracking-tighter uppercase">{formatExpenseDate(item)}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -436,7 +623,7 @@
                                                     </div>
                                                     <div>
                                                         <p className="font-black text-slate-800 text-sm leading-tight mb-1">{item.name}</p>
-                                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{item.date}</p>
+                                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{formatExpenseDate(item)}</p>
                                                     </div>
                                                 </div>
                                                 <p className="font-black text-slate-900 text-lg tabular-nums">¥{item.amount.toLocaleString()}</p>
@@ -573,6 +760,35 @@
                     <div className="flex-grow">
                         {view === 'home' ? renderHome() : renderReport()}
                     </div>
+
+                    {undoToast && (
+                        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 w-[92%] max-w-[420px] z-[120] animate-slide-in">
+                            <div className="bg-slate-900/95 text-white backdrop-blur-2xl rounded-[2rem] border border-white/10 shadow-2xl p-4 flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+                                    <Icon name="trash-2" size={18} />
+                                </div>
+                                <div className="flex-grow min-w-0">
+                                    <p className="text-[11px] font-black tracking-widest uppercase text-slate-300">Deleted</p>
+                                    <p className="font-black text-sm truncate">
+                                        「{undoToast.label}」を削除しました
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={undoDelete}
+                                    className="shrink-0 px-4 py-2 rounded-2xl font-black text-xs bg-white text-slate-900 active:scale-95 transition-all"
+                                >
+                                    取り消す
+                                </button>
+                                <button
+                                    onClick={() => setUndoToast(null)}
+                                    className="shrink-0 w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center text-white/70 hover:text-white active:scale-90 transition-all"
+                                    aria-label="閉じる"
+                                >
+                                    <Icon name="x" size={18} />
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     
                     <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[85%] max-w-[380px] bg-slate-900/90 backdrop-blur-2xl p-2 rounded-[2.5rem] flex justify-around items-center z-50 shadow-2xl border border-white/10">
                         <button onClick={() => setView('home')} className={`flex-1 flex flex-col items-center gap-1 py-4 rounded-[2rem] transition-all ${view === 'home' ? 'bg-indigo-600 text-white shadow-xl scale-105' : 'text-slate-500 hover:text-slate-300'}`}>
