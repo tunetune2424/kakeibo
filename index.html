@@ -84,9 +84,14 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
+// 家計簿アプリ（残高管理）
+// Firebase Firestore をバックエンドに使い、月別の予算・支出を管理する React SPA。
+// ホーム（記録）/ レポート（分析）/ 設定 の3画面構成。
+
 const { useState, useEffect, useMemo, useRef, useCallback, useReducer } = React;
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
+// Firebase の初期化。Firestore に月ごとのドキュメント（予算・支出）を保存する。
 const firebaseConfig = {
     apiKey: "AIzaSyBNwBLLxi-LLqdlqSND69rPzuThhj8cijc",
     authDomain: "my-kakeibo-app-1db52.firebaseapp.com",
@@ -100,6 +105,8 @@ const db = firebase.firestore();
 const { FieldValue } = firebase.firestore;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+// カテゴリ名のハッシュ値からカラーパレットを決定するユーティリティ。
+// fmt() は金額の数値を日本語ロケールでフォーマット、monthStr() は "YYYY-MM" 形式の月文字列を生成する。
 const PALETTES = [
     { bg:'bg-indigo-600', text:'text-white', soft:'bg-indigo-50', softText:'text-indigo-700', hex:'#4f46e5' },
     { bg:'bg-emerald-600',text:'text-white', soft:'bg-emerald-50',softText:'text-emerald-700',hex:'#059669' },
@@ -125,6 +132,10 @@ const fmtDate = (item) => {
 };
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
+// アプリ全体で使い回す小さなUIコンポーネント群。
+// Icon: Lucide アイコンフォントをラップ。
+// ConfirmModal: 削除時の確認ダイアログ（window.confirm の代替）。
+// Toast / UndoToast: 操作後のフィードバック通知と、削除直後に取り消せるトースト。
 const Icon = ({name,size=20,className=''}) => (
     <i className={`lucide-${name} ${className}`} style={{fontSize:size,width:size,height:size,display:'inline-block'}}/>
 );
@@ -179,6 +190,7 @@ const UndoToast = ({toast,onUndo,onClose}) => (
 );
 
 // ─── AddTagModal ──────────────────────────────────────────────────────────────
+// 新しいカテゴリ名を入力して追加するモーダル（重複チェックあり）。
 const AddTagModal = ({tags,onAdd,onClose}) => {
     const [newTagName,setNewTagName]=useState('');
     const handleAdd=useCallback(()=>{
@@ -201,7 +213,10 @@ const AddTagModal = ({tags,onAdd,onClose}) => {
     );
 };
 
-// ─── useFirestore hook ────────────────────────────────────────────────────────
+// ─── useMonthData hook ────────────────────────────────────────────────────────
+// 選択中の月に対応する Firestore ドキュメントをリアルタイム購読するカスタムフック。
+// 予算・カテゴリ予算・支出一覧・カテゴリ一覧を返す。
+// 旧形式データ（expenses フィールド配列）はサブコレクションへ自動マイグレーションする。
 const useMonthData = (currentMonth) => {
     const [budget,     setBudget]     = useState(0);
     const [tagBudgets, setTagBudgets] = useState({});
@@ -268,11 +283,26 @@ const useMonthData = (currentMonth) => {
 };
 
 // ─── MonthlySummaryCard ───────────────────────────────────────────────────────
-const MonthlySummaryCard = ({budget,totalSpent,onEditBudget}) => {
+// ホーム画面上部のサマリーカード。
+// ドーナツグラフで予算消化率を表示し、残高・1日あたり使える金額・予算・支出合計を見せる。
+// 残高が80%超で警告色、超過で赤表示に切り替わる。
+const MonthlySummaryCard = ({budget,totalSpent,onEditBudget,currentMonth}) => {
     const balance = budget - totalSpent;
     const pct  = budget>0 ? Math.min(100,(totalSpent/budget)*100) : 0;
     const isOver = balance<0;
     const isWarn = pct>=80 && !isOver;
+
+    const {remainingDays, dailyBudget} = useMemo(()=>{
+        const today = new Date();
+        const [y,m] = currentMonth.split('-').map(Number);
+        const lastDay = new Date(y,m,0).getDate();
+        const ty=today.getFullYear(), tm=today.getMonth()+1, td=today.getDate();
+        let rd;
+        if(y===ty && m===tm) rd = lastDay - td + 1;
+        else if(y>ty||(y===ty&&m>tm)) rd = lastDay;
+        else rd = 0;
+        return {remainingDays:rd, dailyBudget:(!isOver&&rd>0)?Math.floor(balance/rd):null};
+    },[currentMonth,balance,isOver]);
     const barColor = isOver?'#f43f5e':isWarn?'#f59e0b':'#34d399';
     const R=52, circ=2*Math.PI*R, offset=circ-(pct/100)*circ;
 
@@ -304,6 +334,12 @@ const MonthlySummaryCard = ({budget,totalSpent,onEditBudget}) => {
                     <p className={`text-caption ${isOver?'text-rose-300':isWarn?'text-amber-300':'text-emerald-300'}`}>
                         {isOver ? `¥${fmt(Math.abs(balance))} オーバー` : isWarn ? `残り ¥${fmt(balance)} — 注意` : `残り ¥${fmt(balance)}`}
                     </p>
+                    {dailyBudget!==null && (
+                        <p className="text-caption text-blue-200 mt-1.5" style={{fontSize:'11px'}}>
+                            1日あたり <span className="font-black text-white">¥{fmt(dailyBudget)}</span>
+                            <span className="opacity-60 ml-1">（残り{remainingDays}日）</span>
+                        </p>
+                    )}
                 </div>
             </div>
             {/* 下段カード */}
@@ -328,6 +364,7 @@ const MonthlySummaryCard = ({budget,totalSpent,onEditBudget}) => {
 };
 
 // ─── BudgetModal ──────────────────────────────────────────────────────────────
+// 月の総予算を入力・確定するインラインモーダル。
 const BudgetModal = ({current,onSave,onClose}) => {
     const [val,setVal]=useState(current||'');
     return (
@@ -351,6 +388,7 @@ const BudgetModal = ({current,onSave,onClose}) => {
 };
 
 // ─── ExpenseForm ──────────────────────────────────────────────────────────────
+// 支出を新規登録するフォーム。品目名・金額・カテゴリを入力して Firestore に保存する。
 const ExpenseForm = ({tags,onAdd}) => {
     const [name,setName]     = useState('');
     const [amount,setAmount] = useState('');
@@ -410,6 +448,7 @@ const ExpenseForm = ({tags,onAdd}) => {
 };
 
 // ─── ExpenseItem ──────────────────────────────────────────────────────────────
+// 支出1件を表示するカード。編集モードに切り替えると品目・金額・カテゴリをその場で変更できる。
 const ExpenseItem = ({item,tags,onDelete,onSave}) => {
     const [editing,setEditing]=useState(false);
     const [name,setName]=useState(item.name);
@@ -478,7 +517,9 @@ const ExpenseItem = ({item,tags,onDelete,onSave}) => {
 };
 
 // ─── HomeView ─────────────────────────────────────────────────────────────────
-const HomeView = ({budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast}) => {
+// ホーム画面。サマリーカード・支出入力フォーム・支出履歴リストを束ねる。
+// 削除は確認ダイアログ → 5秒以内なら Undo できるトースト付き。
+const HomeView = ({budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast,currentMonth}) => {
     const [showBudget,setShowBudget]=useState(false);
     const [undoToast,setUndoToast]=useState(null);
     const [confirmDel,setConfirmDel]=useState(null); // {id, name}
@@ -527,7 +568,7 @@ const HomeView = ({budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showT
 
     return (
         <div className="anim-slide">
-            <MonthlySummaryCard budget={budget} totalSpent={totalSpent} onEditBudget={()=>setShowBudget(true)}/>
+            <MonthlySummaryCard budget={budget} totalSpent={totalSpent} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
             <div className="px-6">
                 {showBudget&&(
                     <BudgetModal current={budget} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
@@ -562,6 +603,8 @@ const HomeView = ({budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showT
 };
 
 // ─── ReportView ───────────────────────────────────────────────────────────────
+// レポート画面。月次概要・カテゴリ別割合バー・カテゴリ別予算管理・支出詳細モーダルを表示する。
+// カテゴリをタップすると、そのカテゴリの支出一覧をボトムシートで確認できる。
 const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase}) => {
     const [selectedTag,setSelectedTag]=useState(null);
     const [isAddingTag,setIsAddingTag]=useState(false);
@@ -790,6 +833,8 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
 };
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
+// 設定画面。カテゴリの追加・削除、支出データの CSV エクスポート、アプリ情報を管理する。
+// 支出に使用中のカテゴリは削除できない（誤操作防止）。
 const SettingsView = ({tags,tagBudgets,expenses,budget,updateFirebase,showToast}) => {
     const [confirmDelete,setConfirmDelete]=useState(null);
     const [isAddingTag,setIsAddingTag]=useState(false);
@@ -904,6 +949,8 @@ const SettingsView = ({tags,tagBudgets,expenses,budget,updateFirebase,showToast}
 };
 
 // ─── MonthHeader ──────────────────────────────────────────────────────────────
+// 画面上部の月選択ヘッダー。左右矢印で前後月に移動、月名タップで前後2ヶ月のクイック選択を表示する。
+// オフライン時は警告バナーを表示する。
 const MonthHeader = ({currentMonth,onChangeMonth,onSetMonth,isOnline}) => {
     const [pickerOpen,setPickerOpen]=useState(false);
     const {year,month}=useMemo(()=>{
@@ -955,6 +1002,7 @@ const MonthHeader = ({currentMonth,onChangeMonth,onSetMonth,isOnline}) => {
 };
 
 // ─── App ──────────────────────────────────────────────────────────────────────
+// アプリのルートコンポーネント。月・ビュー状態を管理し、MonthHeader + 各ビュー + ボトムナビを組み合わせる。
 const NAV_ITEMS=[
     {id:'home',    icon:'home',     label:'Home'},
     {id:'report',  icon:'pie-chart',label:'Report'},
@@ -985,7 +1033,7 @@ const App = () => {
         setCurrentMonth(`${y}-${String(m).padStart(2,'0')}`);
     },[]);
 
-    const commonProps={budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast};
+    const commonProps={budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast,currentMonth};
 
     return (
         <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl flex flex-col relative overflow-x-hidden">
