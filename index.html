@@ -22,18 +22,18 @@
             --fs-xl: 22px;
             --fs-2xl: 28px;
             --fs-3xl: 36px;
-            /* Safe Area */
             --sat: env(safe-area-inset-top, 0px);
             --sab: env(safe-area-inset-bottom, 0px);
             --sal: env(safe-area-inset-left, 0px);
             --sar: env(safe-area-inset-right, 0px);
         }
-        @keyframes slideIn   { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
-        @keyframes slideUp   { from { opacity:0; transform:translateY(100%) } to { opacity:1; transform:translateY(0) } }
-        @keyframes fadeIn    { from { opacity:0 } to { opacity:1 } }
-        @keyframes zoomIn    { from { opacity:0; transform:scale(0.93) } to { opacity:1; transform:scale(1) } }
-        @keyframes countUp   { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:translateY(0) } }
-        @keyframes toastIn   { from { opacity:0; transform:translateX(-50%) translateY(16px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }
+        @keyframes slideIn  { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes slideUp  { from { opacity:0; transform:translateY(100%) } to { opacity:1; transform:translateY(0) } }
+        @keyframes fadeIn   { from { opacity:0 } to { opacity:1 } }
+        @keyframes zoomIn   { from { opacity:0; transform:scale(0.93) } to { opacity:1; transform:scale(1) } }
+        @keyframes countUp  { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes toastIn  { from { opacity:0; transform:translateX(-50%) translateY(16px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }
+        @keyframes shimmer  { 0%,100%{opacity:.45} 50%{opacity:.9} }
 
         .anim-slide   { animation: slideIn  0.28s cubic-bezier(.16,1,.3,1) forwards }
         .anim-slideup { animation: slideUp  0.32s cubic-bezier(.16,1,.3,1) forwards }
@@ -41,6 +41,7 @@
         .anim-zoom    { animation: zoomIn   0.22s cubic-bezier(.16,1,.3,1) forwards }
         .anim-countup { animation: countUp  0.38s ease-out forwards }
         .anim-toast   { animation: toastIn  0.28s cubic-bezier(.16,1,.3,1) forwards }
+        .skeleton     { animation: shimmer  1.5s ease-in-out infinite; background:#e2e8f0; border-radius:1.5rem }
 
         .hide-scroll::-webkit-scrollbar { display:none }
         body {
@@ -54,30 +55,18 @@
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
-        /* Safe area ボトムナビ */
-        .bottom-nav {
-            padding-bottom: calc(0.75rem + var(--sab));
-        }
-        /* Safe area コンテンツ下部余白 */
-        .content-pb {
-            padding-bottom: calc(6rem + var(--sab));
-        }
-        .bar-anim { transition: width 0.9s cubic-bezier(.4,0,.2,1) }
+        .bottom-nav { padding-bottom: calc(0.75rem + var(--sab)); }
+        .content-pb { padding-bottom: calc(6rem + var(--sab)); }
+        .bar-anim   { transition: width 0.9s cubic-bezier(.4,0,.2,1) }
         .donut-anim { transition: stroke-dashoffset 0.9s cubic-bezier(.4,0,.2,1) }
-        /* タイポグラフィ変数 */
         .text-label  { font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase }
         .text-value  { font-size: var(--fs-2xl); font-weight: 900; font-variant-numeric: tabular-nums }
         .text-body   { font-size: var(--fs-sm);  font-weight: 700 }
         .text-caption{ font-size: var(--fs-xs);  font-weight: 700; letter-spacing: 0.05em }
-        /* オフラインバナー */
         .offline-banner {
-            background: #f59e0b;
-            color: #1c1917;
-            font-size: var(--fs-xs);
-            font-weight: 800;
-            text-align: center;
-            padding: 6px 16px;
-            letter-spacing: 0.1em;
+            background: #f59e0b; color: #1c1917;
+            font-size: var(--fs-xs); font-weight: 800;
+            text-align: center; padding: 6px 16px; letter-spacing: 0.1em;
         }
     </style>
 </head>
@@ -88,10 +77,9 @@
 // Firebase Firestore をバックエンドに使い、月別の予算・支出を管理する React SPA。
 // ホーム（記録）/ レポート（分析）/ 設定 の3画面構成。
 
-const { useState, useEffect, useMemo, useRef, useCallback, useReducer } = React;
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
-// Firebase の初期化。Firestore に月ごとのドキュメント（予算・支出）を保存する。
 const firebaseConfig = {
     apiKey: "AIzaSyBNwBLLxi-LLqdlqSND69rPzuThhj8cijc",
     authDomain: "my-kakeibo-app-1db52.firebaseapp.com",
@@ -105,8 +93,9 @@ const db = firebase.firestore();
 const { FieldValue } = firebase.firestore;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-// カテゴリ名のハッシュ値からカラーパレットを決定するユーティリティ。
-// fmt() は金額の数値を日本語ロケールでフォーマット、monthStr() は "YYYY-MM" 形式の月文字列を生成する。
+const APP_VERSION  = '3.1.0';
+const DEFAULT_TAGS = ['食費','日用品','交通費','娯楽'];
+
 const PALETTES = [
     { bg:'bg-indigo-600', text:'text-white', soft:'bg-indigo-50', softText:'text-indigo-700', hex:'#4f46e5' },
     { bg:'bg-emerald-600',text:'text-white', soft:'bg-emerald-50',softText:'text-emerald-700',hex:'#059669' },
@@ -117,30 +106,45 @@ const PALETTES = [
     { bg:'bg-teal-600',   text:'text-white', soft:'bg-teal-50',   softText:'text-teal-700',   hex:'#0d9488' },
     { bg:'bg-fuchsia-600',text:'text-white', soft:'bg-fuchsia-50',softText:'text-fuchsia-700',hex:'#c026d3' },
 ];
+
 const tagColor = (tag) => {
     let h = 0;
-    for (let i=0;i<(tag||'').length;i++) h=(h*31+tag.charCodeAt(i))>>>0;
+    for (let i = 0; i < (tag||'').length; i++) h = (h*31 + tag.charCodeAt(i)) >>> 0;
     return PALETTES[h % PALETTES.length];
 };
-const fmt  = (n) => Math.abs(Number(n)).toLocaleString('ja-JP');
-const nowMs = () => Date.now();
+
+const fmt     = (n) => Math.abs(Number(n)).toLocaleString('ja-JP');
+const nowMs   = () => Date.now();
 const monthStr = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+
+// 絶対日時フォーマット（レガシー互換）
 const fmtDate = (item) => {
-    if (typeof item?.createdAtMillis==='number')
+    if (typeof item?.createdAtMillis === 'number')
         return new Date(item.createdAtMillis).toLocaleString('ja-JP',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-    return item?.legacyDateStr||item?.date||'';
+    return item?.legacyDateStr || item?.date || '';
+};
+
+// 相対日時フォーマット（今日・昨日・○日前）
+const fmtRelativeDate = (item) => {
+    if (typeof item?.createdAtMillis !== 'number') return item?.legacyDateStr || item?.date || '';
+    const ms       = item.createdAtMillis;
+    const itemDate = new Date(ms);
+    const today    = new Date();
+    const timeStr  = itemDate.toLocaleString('ja-JP', {hour:'2-digit', minute:'2-digit'});
+    const toDay    = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (toDay(itemDate) === toDay(today)) return `今日 ${timeStr}`;
+    const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+    if (toDay(itemDate) === toDay(yesterday)) return `昨日 ${timeStr}`;
+    const diffDays = Math.floor((Date.now() - ms) / 86400000);
+    if (diffDays < 7) return `${diffDays}日前`;
+    return itemDate.toLocaleString('ja-JP', {month:'2-digit', day:'2-digit'});
 };
 
 // ─── Shared UI ───────────────────────────────────────────────────────────────
-// アプリ全体で使い回す小さなUIコンポーネント群。
-// Icon: Lucide アイコンフォントをラップ。
-// ConfirmModal: 削除時の確認ダイアログ（window.confirm の代替）。
-// Toast / UndoToast: 操作後のフィードバック通知と、削除直後に取り消せるトースト。
-const Icon = ({name,size=20,className=''}) => (
+const Icon = ({name, size=20, className=''}) => (
     <i className={`lucide-${name} ${className}`} style={{fontSize:size,width:size,height:size,display:'inline-block'}}/>
 );
 
-// カスタム確認モーダル（confirm()の代替）
 const ConfirmModal = ({message, onOk, onCancel}) => (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6 anim-fade">
         <div className="bg-white w-full max-w-xs p-8 rounded-[3rem] shadow-2xl anim-zoom text-center">
@@ -157,21 +161,20 @@ const ConfirmModal = ({message, onOk, onCancel}) => (
     </div>
 );
 
-// トースト通知
 const Toast = ({message, type='success', onClose}) => {
-    const icons = {success:'check-circle',error:'alert-circle',info:'info'};
+    const icons = {success:'check-circle', error:'alert-circle', info:'info'};
+    const colors = {success:'#10b981', error:'#ef4444', info:'#6366f1'};
     return (
-        <div className={`fixed top-4 left-1/2 z-[300] px-5 py-3 rounded-2xl text-white shadow-2xl flex items-center gap-3 anim-toast`}
-             style={{transform:'translateX(-50%)',background: type==='success'?'#10b981':type==='error'?'#ef4444':'#6366f1'}}>
+        <div className="fixed top-4 left-1/2 z-[300] px-5 py-3 rounded-2xl text-white shadow-2xl flex items-center gap-3 anim-toast"
+             style={{transform:'translateX(-50%)', background:colors[type]}}>
             <Icon name={icons[type]} size={18}/>
             <span className="text-body text-white">{message}</span>
-            {onClose&&<button onClick={onClose} className="ml-1 opacity-60 hover:opacity-100 active:scale-90 transition-all"><Icon name="x" size={14}/></button>}
+            {onClose && <button onClick={onClose} className="ml-1 opacity-60 hover:opacity-100 active:scale-90 transition-all"><Icon name="x" size={14}/></button>}
         </div>
     );
 };
 
-// Undoトースト
-const UndoToast = ({toast,onUndo,onClose}) => (
+const UndoToast = ({toast, onUndo, onClose}) => (
     <div className="fixed bottom-28 left-1/2 z-[150] w-[92%] max-w-[420px] anim-toast" style={{transform:'translateX(-50%)'}}>
         <div className="bg-slate-900/95 text-white backdrop-blur-2xl rounded-[2rem] border border-white/10 shadow-2xl p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
@@ -189,23 +192,43 @@ const UndoToast = ({toast,onUndo,onClose}) => (
     </div>
 );
 
+// ローディング中のスケルトン表示
+const LoadingView = () => (
+    <div className="px-6 pt-4 space-y-4 anim-fade">
+        <div className="skeleton h-52 w-full" style={{borderRadius:'2.5rem'}}/>
+        <div className="skeleton h-10 w-full" style={{borderRadius:'2rem'}}/>
+        <div className="skeleton h-36 w-full" style={{borderRadius:'2.5rem'}}/>
+        <div className="skeleton h-24 w-full" style={{borderRadius:'2rem'}}/>
+        <div className="skeleton h-24 w-full" style={{borderRadius:'2rem'}}/>
+    </div>
+);
+
 // ─── AddTagModal ──────────────────────────────────────────────────────────────
-// 新しいカテゴリ名を入力して追加するモーダル（重複チェックあり）。
-const AddTagModal = ({tags,onAdd,onClose}) => {
-    const [newTagName,setNewTagName]=useState('');
-    const handleAdd=useCallback(()=>{
-        if(newTagName&&!tags.includes(newTagName)){ onAdd(newTagName); onClose(); }
-    },[newTagName,tags,onAdd,onClose]);
+const AddTagModal = ({tags, onAdd, onClose}) => {
+    const [newTagName, setNewTagName] = useState('');
+    const isDup = tags.includes(newTagName.trim());
+    const handleAdd = useCallback(() => {
+        const name = newTagName.trim();
+        if (name && !isDup) { onAdd(name); onClose(); }
+    }, [newTagName, isDup, onAdd, onClose]);
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-6 anim-fade">
             <div className="bg-white w-full max-w-xs p-8 rounded-[3.5rem] shadow-2xl anim-zoom">
                 <h3 className="text-label text-slate-400 mb-6 text-center">新しいカテゴリ名</h3>
                 <input type="text" placeholder="食費、趣味など"
-                    className="w-full p-2 font-black border-b-4 border-indigo-500 outline-none mb-8 text-center bg-transparent text-slate-800"
+                    className="w-full p-2 font-black border-b-4 border-indigo-500 outline-none mb-2 text-center bg-transparent text-slate-800"
                     style={{fontSize:'var(--fs-2xl)'}}
-                    value={newTagName} onChange={e=>setNewTagName(e.target.value)} autoFocus/>
+                    value={newTagName}
+                    onChange={e=>setNewTagName(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter') handleAdd(); }}
+                    autoFocus/>
+                {isDup && <p className="text-caption text-rose-500 text-center mb-4">同じ名前のカテゴリがあります</p>}
+                {!isDup && <div className="mb-4"/>}
                 <div className="flex flex-col gap-3">
-                    <button onClick={handleAdd} className="bg-slate-900 text-white py-4 rounded-2xl font-black shadow-lg">追加する</button>
+                    <button onClick={handleAdd} disabled={!newTagName.trim()||isDup}
+                        className={`py-4 rounded-2xl font-black shadow-lg ${newTagName.trim()&&!isDup?'bg-slate-900 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                        追加する
+                    </button>
                     <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption">キャンセル</button>
                 </div>
             </div>
@@ -214,102 +237,128 @@ const AddTagModal = ({tags,onAdd,onClose}) => {
 };
 
 // ─── useMonthData hook ────────────────────────────────────────────────────────
-// 選択中の月に対応する Firestore ドキュメントをリアルタイム購読するカスタムフック。
-// 予算・カテゴリ予算・支出一覧・カテゴリ一覧を返す。
-// 旧形式データ（expenses フィールド配列）はサブコレクションへ自動マイグレーションする。
+// Firestore から月別データをリアルタイム購読するカスタムフック。
+// isLoading: 初回データ取得中フラグ（スケルトン表示に利用）
 const useMonthData = (currentMonth) => {
     const [budget,     setBudget]     = useState(0);
     const [tagBudgets, setTagBudgets] = useState({});
     const [expenses,   setExpenses]   = useState([]);
-    const [tags,       setTags]       = useState(['食費','日用品','交通費','娯楽']);
+    const [tags,       setTags]       = useState(DEFAULT_TAGS);
     const [isOnline,   setIsOnline]   = useState(navigator.onLine);
+    const [isLoading,  setIsLoading]  = useState(true);
 
-    const monthRef = useMemo(()=>db.collection('months').doc(currentMonth),[currentMonth]);
+    const monthRef = useMemo(() => db.collection('months').doc(currentMonth), [currentMonth]);
 
-    const updateFirebase = useCallback(async(updates)=>{
-        try { await monthRef.set(updates,{merge:true}); }
-        catch(e){ console.error(e); }
-    },[monthRef]);
+    const updateFirebase = useCallback(async (updates) => {
+        try { await monthRef.set(updates, {merge:true}); }
+        catch(e) { console.error(e); }
+    }, [monthRef]);
 
-    useEffect(()=>{
-        const on  = ()=>setIsOnline(true);
-        const off = ()=>setIsOnline(false);
-        window.addEventListener('online',on);
-        window.addEventListener('offline',off);
-        return ()=>{ window.removeEventListener('online',on); window.removeEventListener('offline',off); };
-    },[]);
+    useEffect(() => {
+        const on  = () => setIsOnline(true);
+        const off = () => setIsOnline(false);
+        window.addEventListener('online',  on);
+        window.addEventListener('offline', off);
+        return () => { window.removeEventListener('online',on); window.removeEventListener('offline',off); };
+    }, []);
 
-    useEffect(()=>{
-        let cancelled=false;
-        const unsubMonth = monthRef.onSnapshot(async(doc)=>{
-            if(cancelled) return;
-            if(doc.exists){
-                const d=doc.data()||{};
+    useEffect(() => {
+        setIsLoading(true);
+        let cancelled = false;
+        let expLoaded = false;
+        let monthLoaded = false;
+        const tryFinish = () => { if (expLoaded && monthLoaded) setIsLoading(false); };
+
+        const unsubMonth = monthRef.onSnapshot(async (doc) => {
+            if (cancelled) return;
+            if (doc.exists) {
+                const d = doc.data() || {};
                 setBudget(Number(d.budget||0));
                 setTagBudgets(d.tagBudgets||{});
-                if(d.tags) setTags(d.tags);
-                // 旧形式移行
-                if(Array.isArray(d.expenses)&&d.expenses.length>0&&!d.migratedToSubcollection){
-                    try{
-                        const batch=db.batch();
-                        const col=monthRef.collection('expenses');
-                        d.expenses.forEach(item=>{
-                            batch.set(col.doc(),{
-                                name:String(item?.name??''), amount:Number(item?.amount??0),
-                                tag:String(item?.tag??'未分類'),
-                                createdAtMillis:typeof item?.createdAtMillis==='number'?item.createdAtMillis:nowMs(),
-                                createdAt:FieldValue.serverTimestamp(),
+                if (d.tags) setTags(d.tags);
+                // 旧形式サブコレクション移行
+                if (Array.isArray(d.expenses) && d.expenses.length > 0 && !d.migratedToSubcollection) {
+                    try {
+                        const batch = db.batch();
+                        const col   = monthRef.collection('expenses');
+                        d.expenses.forEach(item => {
+                            batch.set(col.doc(), {
+                                name: String(item?.name??''), amount: Number(item?.amount??0),
+                                tag:  String(item?.tag??'未分類'),
+                                createdAtMillis: typeof item?.createdAtMillis==='number' ? item.createdAtMillis : nowMs(),
+                                createdAt: FieldValue.serverTimestamp(),
                             });
                         });
-                        batch.set(monthRef,{migratedToSubcollection:true,expenses:FieldValue.delete()},{merge:true});
+                        batch.set(monthRef, {migratedToSubcollection:true, expenses:FieldValue.delete()}, {merge:true});
                         await batch.commit();
-                    }catch(e){console.error(e);}
+                    } catch(e) { console.error(e); }
                 }
-            }else{
+            } else {
                 setBudget(0); setTagBudgets({});
-                updateFirebase({tags:['食費','日用品','交通費','娯楽']});
+                updateFirebase({tags: DEFAULT_TAGS});
             }
+            monthLoaded = true;
+            tryFinish();
         });
+
         const unsubExp = monthRef.collection('expenses')
             .orderBy('createdAtMillis','desc')
-            .onSnapshot(snap=>{
-                if(cancelled) return;
-                setExpenses(snap.docs.map(d=>({id:d.id,...d.data()})));
+            .onSnapshot(snap => {
+                if (cancelled) return;
+                setExpenses(snap.docs.map(d => ({id:d.id, ...d.data()})));
+                expLoaded = true;
+                tryFinish();
             });
-        return ()=>{ cancelled=true; unsubMonth(); unsubExp(); };
-    },[currentMonth,monthRef,updateFirebase]);
 
-    return {budget,tagBudgets,expenses,tags,updateFirebase,monthRef,isOnline};
+        return () => { cancelled=true; unsubMonth(); unsubExp(); };
+    }, [currentMonth, monthRef, updateFirebase]);
+
+    return {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, isOnline, isLoading};
 };
 
 // ─── MonthlySummaryCard ───────────────────────────────────────────────────────
-// ホーム画面上部のサマリーカード。
-// ドーナツグラフで予算消化率を表示し、残高・1日あたり使える金額・予算・支出合計を見せる。
-// 残高が80%超で警告色、超過で赤表示に切り替わる。
-const MonthlySummaryCard = ({budget,totalSpent,onEditBudget,currentMonth}) => {
+// ホーム上部のサマリーカード。予算未設定時はセットアップ促進CTAを表示。
+const MonthlySummaryCard = ({budget, totalSpent, onEditBudget, currentMonth}) => {
     const balance = budget - totalSpent;
-    const pct  = budget>0 ? Math.min(100,(totalSpent/budget)*100) : 0;
-    const isOver = balance<0;
-    const isWarn = pct>=80 && !isOver;
+    const pct     = budget > 0 ? Math.min(100, (totalSpent/budget)*100) : 0;
+    const isOver  = balance < 0;
+    const isWarn  = pct >= 80 && !isOver;
 
-    const {remainingDays, dailyBudget} = useMemo(()=>{
+    const {remainingDays, dailyBudget} = useMemo(() => {
         const today = new Date();
         const [y,m] = currentMonth.split('-').map(Number);
         const lastDay = new Date(y,m,0).getDate();
         const ty=today.getFullYear(), tm=today.getMonth()+1, td=today.getDate();
         let rd;
-        if(y===ty && m===tm) rd = lastDay - td + 1;
-        else if(y>ty||(y===ty&&m>tm)) rd = lastDay;
+        if (y===ty && m===tm) rd = lastDay - td + 1;
+        else if (y>ty||(y===ty&&m>tm)) rd = lastDay;
         else rd = 0;
-        return {remainingDays:rd, dailyBudget:(!isOver&&rd>0)?Math.floor(balance/rd):null};
-    },[currentMonth,balance,isOver]);
-    const barColor = isOver?'#f43f5e':isWarn?'#f59e0b':'#34d399';
+        return {remainingDays:rd, dailyBudget:(!isOver&&rd>0) ? Math.floor(balance/rd) : null};
+    }, [currentMonth, balance, isOver]);
+
+    const barColor = isOver ? '#f43f5e' : isWarn ? '#f59e0b' : '#34d399';
     const R=52, circ=2*Math.PI*R, offset=circ-(pct/100)*circ;
 
     return (
         <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-500 text-white px-8 pt-6 pb-10 rounded-b-[3.5rem] shadow-xl relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-48 h-48 bg-white/10 rounded-full blur-3xl pointer-events-none"/>
-            {/* ドーナツ + 数値 */}
+
+            {/* 予算未設定バナー */}
+            {budget === 0 && (
+                <button onClick={onEditBudget}
+                    className="w-full mb-6 flex items-center gap-3 bg-white/15 hover:bg-white/25 border border-white/20 rounded-2xl px-5 py-3.5 transition-all active:scale-[0.98]">
+                    <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center shrink-0">
+                        <Icon name="target" size={18} className="text-white"/>
+                    </div>
+                    <div className="text-left flex-1">
+                        <p className="font-black text-white" style={{fontSize:'var(--fs-sm)'}}>今月の予算を設定する</p>
+                        <p className="text-blue-200" style={{fontSize:'var(--fs-xs)'}}>タップして予算を入力</p>
+                    </div>
+                    <Icon name="chevron-right" size={18} className="text-white/50"/>
+                </button>
+            )}
+
+            {/* ドーナツ + 残高 */}
             <div className="flex items-center gap-6 mb-8">
                 <div className="relative shrink-0">
                     <svg width="128" height="128" viewBox="0 0 128 128">
@@ -326,15 +375,16 @@ const MonthlySummaryCard = ({budget,totalSpent,onEditBudget,currentMonth}) => {
                 </div>
                 <div className="flex-1 min-w-0 anim-countup">
                     <p className="text-label text-blue-200 mb-1" style={{fontSize:'10px'}}>残高</p>
-                    <p className={`font-black tabular-nums tracking-tighter leading-none mb-2 ${isOver?'text-rose-300':'text-white'}`} style={{fontSize:'clamp(28px,7vw,40px)'}}>
+                    <p className={`font-black tabular-nums tracking-tighter leading-none mb-2 ${isOver?'text-rose-300':'text-white'}`}
+                       style={{fontSize:'clamp(28px,7vw,40px)'}}>
                         <span className="opacity-40 mr-0.5" style={{fontSize:'60%'}}>¥</span>
                         {fmt(balance)}
-                        {isOver&&<span className="ml-1 opacity-70" style={{fontSize:'50%'}}>超過</span>}
+                        {isOver && <span className="ml-1 opacity-70" style={{fontSize:'50%'}}>超過</span>}
                     </p>
                     <p className={`text-caption ${isOver?'text-rose-300':isWarn?'text-amber-300':'text-emerald-300'}`}>
                         {isOver ? `¥${fmt(Math.abs(balance))} オーバー` : isWarn ? `残り ¥${fmt(balance)} — 注意` : `残り ¥${fmt(balance)}`}
                     </p>
-                    {dailyBudget!==null && (
+                    {dailyBudget !== null && (
                         <p className="text-caption text-blue-200 mt-1.5" style={{fontSize:'11px'}}>
                             1日あたり <span className="font-black text-white">¥{fmt(dailyBudget)}</span>
                             <span className="opacity-60 ml-1">（残り{remainingDays}日）</span>
@@ -342,19 +392,26 @@ const MonthlySummaryCard = ({budget,totalSpent,onEditBudget,currentMonth}) => {
                     )}
                 </div>
             </div>
+
             {/* 下段カード */}
             <div className="grid grid-cols-2 gap-3">
                 <button onClick={onEditBudget} className="bg-white/10 hover:bg-white/20 active:scale-95 transition-all p-4 rounded-[1.75rem] border border-white/10 text-left">
-                    <div className="flex items-center gap-1.5 mb-2"><Icon name="target" size={11} className="opacity-60"/><p className="text-label opacity-60" style={{fontSize:'9px'}}>総予算</p></div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <Icon name="target" size={11} className="opacity-60"/>
+                        <p className="text-label opacity-60" style={{fontSize:'9px'}}>総予算</p>
+                    </div>
                     <p className="font-black tabular-nums" style={{fontSize:'var(--fs-xl)'}}>¥{fmt(budget)}</p>
                     <p className="text-label opacity-40 mt-1" style={{fontSize:'9px'}}>タップで編集</p>
                 </button>
                 <div className="bg-white/10 p-4 rounded-[1.75rem] border border-white/10 text-left">
-                    <div className="flex items-center gap-1.5 mb-2"><Icon name="trending-down" size={11} className="opacity-60"/><p className="text-label opacity-60" style={{fontSize:'9px'}}>支出計</p></div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <Icon name="trending-down" size={11} className="opacity-60"/>
+                        <p className="text-label opacity-60" style={{fontSize:'9px'}}>支出計</p>
+                    </div>
                     <p className="font-black tabular-nums text-rose-200" style={{fontSize:'var(--fs-xl)'}}>¥{fmt(totalSpent)}</p>
-                    {budget>0&&(
+                    {budget > 0 && (
                         <div className="mt-2 w-full bg-black/20 h-1.5 rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bar-anim" style={{width:`${pct}%`,backgroundColor:barColor}}/>
+                            <div className="h-full rounded-full bar-anim" style={{width:`${pct}%`, backgroundColor:barColor}}/>
                         </div>
                     )}
                 </div>
@@ -364,9 +421,9 @@ const MonthlySummaryCard = ({budget,totalSpent,onEditBudget,currentMonth}) => {
 };
 
 // ─── BudgetModal ──────────────────────────────────────────────────────────────
-// 月の総予算を入力・確定するインラインモーダル。
-const BudgetModal = ({current,onSave,onClose}) => {
-    const [val,setVal]=useState(current||'');
+const BudgetModal = ({current, onSave, onClose}) => {
+    const [val, setVal] = useState(current||'');
+    const handleSave = () => { if (Number(val)>0) { onSave(Number(val)); onClose(); } };
     return (
         <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-500 anim-slide relative z-20">
             <div className="flex justify-between items-center mb-6">
@@ -375,11 +432,15 @@ const BudgetModal = ({current,onSave,onClose}) => {
             </div>
             <div className="relative mb-8">
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
-                <input type="number" className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800" style={{fontSize:'var(--fs-3xl)'}}
-                    value={val} onChange={e=>setVal(e.target.value)} autoFocus/>
+                <input type="number" inputMode="numeric"
+                    className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800"
+                    style={{fontSize:'var(--fs-3xl)'}}
+                    value={val}
+                    onChange={e=>setVal(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
+                    autoFocus/>
             </div>
-            <button onClick={()=>{if(Number(val)>0){onSave(Number(val));onClose();}}}
-                disabled={!(Number(val)>0)}
+            <button onClick={handleSave} disabled={!(Number(val)>0)}
                 className={`w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all ${Number(val)>0?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
                 この金額で確定する
             </button>
@@ -388,21 +449,20 @@ const BudgetModal = ({current,onSave,onClose}) => {
 };
 
 // ─── ExpenseForm ──────────────────────────────────────────────────────────────
-// 支出を新規登録するフォーム。品目名・金額・カテゴリを入力して Firestore に保存する。
-const ExpenseForm = ({tags,onAdd}) => {
-    const [name,setName]     = useState('');
-    const [amount,setAmount] = useState('');
-    const [tag,setTag]       = useState('');
+const ExpenseForm = ({tags, onAdd}) => {
+    const [name,   setName]   = useState('');
+    const [amount, setAmount] = useState('');
+    const [tag,    setTag]    = useState('');
     const nameRef=useRef(null), amountRef=useRef(null);
-    const canSubmit = name.trim().length>0 && Number(amount)>0;
+    const canSubmit = name.trim().length > 0 && Number(amount) > 0;
 
-    const handleSubmit = useCallback(async(e)=>{
+    const handleSubmit = useCallback(async (e) => {
         e.preventDefault();
-        if(!canSubmit) return;
-        await onAdd({name,amount:Number(amount),tag:tag||'未分類'});
+        if (!canSubmit) return;
+        await onAdd({name:name.trim(), amount:Number(amount), tag:tag||'未分類'});
         setName(''); setAmount(''); setTag('');
-        requestAnimationFrame(()=>nameRef.current?.focus());
-    },[name,amount,tag,canSubmit,onAdd]);
+        requestAnimationFrame(() => nameRef.current?.focus());
+    }, [name, amount, tag, canSubmit, onAdd]);
 
     return (
         <div className="bg-white p-7 rounded-[3rem] shadow-sm border border-slate-100 mb-8 mt-12">
@@ -414,19 +474,21 @@ const ExpenseForm = ({tags,onAdd}) => {
                     <Icon name="edit-3" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"/>
                     <input ref={nameRef} type="text" placeholder="品目（例: 昼食代）"
                         className="w-full p-4 pl-11 bg-slate-50 rounded-2xl outline-none text-body border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all"
-                        value={name} onChange={e=>setName(e.target.value)}
-                        onKeyDown={e=>{ if(e.key==='Enter'&&(!amount||Number(amount)<=0)){e.preventDefault();amountRef.current?.focus();}}}/>
+                        value={name}
+                        onChange={e=>setName(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); amountRef.current?.focus(); }}}/>
                 </div>
                 <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-300 text-lg">¥</span>
-                    <input ref={amountRef} type="number" placeholder="金額"
+                    <input ref={amountRef} type="number" inputMode="numeric" placeholder="金額"
                         className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none font-black tabular-nums border-2 border-transparent focus:border-indigo-100 focus:bg-white transition-all"
                         style={{fontSize:'var(--fs-2xl)'}}
-                        value={amount} onChange={e=>setAmount(e.target.value)}/>
+                        value={amount}
+                        onChange={e=>setAmount(e.target.value)}/>
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1">
-                    {tags.map(t=>{
-                        const c=tagColor(t); const sel=tag===t;
+                    {tags.map(t => {
+                        const c=tagColor(t), sel=tag===t;
                         return (
                             <button type="button" key={t} onClick={()=>setTag(sel?'':t)}
                                 className={`px-5 py-2.5 rounded-xl text-caption transition-all border-2 ${sel?`${c.bg} ${c.text} shadow-md border-white/20`:'bg-white border-slate-100 text-slate-400'}`}>
@@ -435,7 +497,7 @@ const ExpenseForm = ({tags,onAdd}) => {
                         );
                     })}
                 </div>
-                {!canSubmit&&(name.trim()||amount)&&(
+                {!canSubmit && (name.trim()||amount) && (
                     <p className="text-caption text-rose-500 bg-rose-50 border border-rose-100 rounded-2xl px-4 py-3">品目と金額（1円以上）を入力してください</p>
                 )}
                 <button type="submit" disabled={!canSubmit}
@@ -448,29 +510,36 @@ const ExpenseForm = ({tags,onAdd}) => {
 };
 
 // ─── ExpenseItem ──────────────────────────────────────────────────────────────
-// 支出1件を表示するカード。編集モードに切り替えると品目・金額・カテゴリをその場で変更できる。
-const ExpenseItem = ({item,tags,onDelete,onSave}) => {
-    const [editing,setEditing]=useState(false);
-    const [name,setName]=useState(item.name);
-    const [amount,setAmount]=useState(item.amount);
-    const [tag,setTag]=useState(item.tag);
-    const c=tagColor(item.tag);
-    useEffect(()=>{
-        if(!editing){ setName(item.name); setAmount(item.amount); setTag(item.tag); }
-    },[item.name,item.amount,item.tag,editing]);
+// 支出1件カード。相対日時表示・インライン編集対応。
+const ExpenseItem = ({item, tags, onDelete, onSave}) => {
+    const [editing, setEditing] = useState(false);
+    const [name,    setName]    = useState(item.name);
+    const [amount,  setAmount]  = useState(item.amount);
+    const [tag,     setTag]     = useState(item.tag);
+    const c = tagColor(item.tag);
 
-    const handleSave=useCallback(async()=>{
-        await onSave(item.id,{name,amount:Number(amount),tag});
+    useEffect(() => {
+        if (!editing) { setName(item.name); setAmount(item.amount); setTag(item.tag); }
+    }, [item.name, item.amount, item.tag, editing]);
+
+    const handleSave = useCallback(async () => {
+        if (!name.trim() || Number(amount) <= 0) return;
+        await onSave(item.id, {name:name.trim(), amount:Number(amount), tag});
         setEditing(false);
-    },[item.id,name,amount,tag,onSave]);
+    }, [item.id, name, amount, tag, onSave]);
 
-    if(editing) return (
+    if (editing) return (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-6 bg-indigo-50/50 space-y-4 anim-slide">
-                <input type="text" className="w-full p-4 bg-white rounded-2xl border border-indigo-200 outline-none text-body" value={name} onChange={e=>setName(e.target.value)}/>
-                <input type="number" className="w-full p-4 bg-white rounded-2xl border border-indigo-200 outline-none font-black tabular-nums" style={{fontSize:'var(--fs-xl)'}} value={amount} onChange={e=>setAmount(e.target.value)}/>
+                <input type="text"
+                    className="w-full p-4 bg-white rounded-2xl border border-indigo-200 outline-none text-body"
+                    value={name} onChange={e=>setName(e.target.value)}/>
+                <input type="number" inputMode="numeric"
+                    className="w-full p-4 bg-white rounded-2xl border border-indigo-200 outline-none font-black tabular-nums"
+                    style={{fontSize:'var(--fs-xl)'}}
+                    value={amount} onChange={e=>setAmount(e.target.value)}/>
                 <div className="flex flex-wrap gap-2">
-                    {tags.map(t=>{const tc=tagColor(t);return(
+                    {tags.map(t => { const tc=tagColor(t); return (
                         <button type="button" key={t} onClick={()=>setTag(t)}
                             className={`px-4 py-2 rounded-xl text-caption transition-all border-2 ${tag===t?`${tc.bg} ${tc.text} border-white/20`:'bg-white border-slate-200 text-slate-400'}`}>{t}</button>
                     );})}
@@ -485,30 +554,32 @@ const ExpenseItem = ({item,tags,onDelete,onSave}) => {
 
     return (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
-            <div className="p-6">
-                <div className="flex justify-between items-center mb-5">
-                    <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-slate-50 rounded-[1.25rem] flex items-center justify-center border border-slate-100 text-indigo-500">
-                            <Icon name="receipt" size={24}/>
+            <div className="p-5">
+                <div className="flex justify-between items-center mb-4">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-12 h-12 bg-slate-50 rounded-[1.25rem] flex items-center justify-center border border-slate-100 text-indigo-500 shrink-0">
+                            <Icon name="receipt" size={20}/>
                         </div>
-                        <div>
-                            <p className="font-black text-slate-800 leading-tight mb-1.5" style={{fontSize:'var(--fs-lg)'}}>{item.name}</p>
-                            <div className="flex items-center gap-2">
-                                <span className={`text-caption px-2 py-0.5 rounded-md ${c.bg} ${c.text}`}>{item.tag}</span>
-                                <span className="text-caption text-slate-400">{fmtDate(item)}</span>
+                        <div className="min-w-0">
+                            <p className="font-black text-slate-800 leading-tight truncate" style={{fontSize:'var(--fs-base)'}}>{item.name}</p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className={`text-caption px-2 py-0.5 rounded-md ${c.bg} ${c.text} shrink-0`}>{item.tag}</span>
+                                <span className="text-caption text-slate-400">{fmtRelativeDate(item)}</span>
                             </div>
                         </div>
                     </div>
-                    <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-2xl)'}}>
+                    <p className="font-black text-slate-900 tabular-nums ml-3 shrink-0" style={{fontSize:'var(--fs-xl)'}}>
                         <span className="opacity-30 mr-0.5" style={{fontSize:'60%'}}>¥</span>{fmt(item.amount)}
                     </p>
                 </div>
-                <div className="flex gap-2 pt-2 border-t border-slate-50">
-                    <button onClick={()=>setEditing(true)} className="flex-1 flex items-center justify-center gap-2 text-caption text-slate-500 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 py-3 rounded-xl transition-all">
-                        <Icon name="edit-3" size={14}/> 編集
+                <div className="flex gap-2 border-t border-slate-50 pt-3">
+                    <button onClick={()=>setEditing(true)}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-500 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 py-2.5 rounded-xl transition-all">
+                        <Icon name="edit-3" size={13}/> 編集
                     </button>
-                    <button onClick={()=>onDelete(item.id,item.name)} className="flex-1 flex items-center justify-center gap-2 text-caption text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 py-3 rounded-xl transition-all">
-                        <Icon name="trash-2" size={14}/> 削除
+                    <button onClick={()=>onDelete(item.id, item.name)}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 py-2.5 rounded-xl transition-all">
+                        <Icon name="trash-2" size={13}/> 削除
                     </button>
                 </div>
             </div>
@@ -517,121 +588,189 @@ const ExpenseItem = ({item,tags,onDelete,onSave}) => {
 };
 
 // ─── HomeView ─────────────────────────────────────────────────────────────────
-// ホーム画面。サマリーカード・支出入力フォーム・支出履歴リストを束ねる。
-// 削除は確認ダイアログ → 5秒以内なら Undo できるトースト付き。
-const HomeView = ({budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast,currentMonth}) => {
-    const [showBudget,setShowBudget]=useState(false);
-    const [undoToast,setUndoToast]=useState(null);
-    const [confirmDel,setConfirmDel]=useState(null); // {id, name}
-    const undoTimer=useRef(null);
+// ホーム画面。別月表示バナー・カテゴリフィルター・支出履歴リスト。
+const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
+    const [showBudget, setShowBudget] = useState(false);
+    const [undoToast,  setUndoToast]  = useState(null);
+    const [confirmDel, setConfirmDel] = useState(null);
+    const [filterTag,  setFilterTag]  = useState(null);
+    const undoTimer = useRef(null);
 
-    const totalSpent=useMemo(()=>expenses.reduce((s,e)=>s+e.amount,0),[expenses]);
+    const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
 
-    const handleAdd=useCallback(async({name,amount,tag})=>{
-        try{
+    // 別月表示中かどうか
+    const isCurrentMonth = currentMonth === monthStr();
+
+    // カテゴリフィルター適用
+    const filteredExpenses = useMemo(() =>
+        filterTag ? expenses.filter(e=>e.tag===filterTag) : expenses,
+    [expenses, filterTag]);
+
+    // フィルター用カテゴリ（使用中のもののみ）
+    const usedTags = useMemo(() =>
+        [...new Set(expenses.map(e=>e.tag))],
+    [expenses]);
+
+    const handleAdd = useCallback(async ({name, amount, tag}) => {
+        try {
             await monthRef.collection('expenses').doc().set({
-                name,amount,tag,createdAtMillis:nowMs(),createdAt:FieldValue.serverTimestamp()
+                name, amount, tag, createdAtMillis:nowMs(), createdAt:FieldValue.serverTimestamp()
             });
-            showToast('記録を保存しました','success');
-        }catch(e){showToast('保存に失敗しました','error');}
-    },[monthRef,showToast]);
+            showToast('記録を保存しました', 'success');
+        } catch(e) { showToast('保存に失敗しました', 'error'); }
+    }, [monthRef, showToast]);
 
-    const handleDeleteConfirmed=useCallback(async()=>{
-        if(!confirmDel) return;
-        const {id,name}=confirmDel;
+    const handleDeleteConfirmed = useCallback(async () => {
+        if (!confirmDel) return;
+        const {id, name} = confirmDel;
         setConfirmDel(null);
-        const snap=await monthRef.collection('expenses').doc(id).get();
-        if(!snap.exists) return;
-        const data=snap.data();
+        const snap = await monthRef.collection('expenses').doc(id).get();
+        if (!snap.exists) return;
+        const data = snap.data();
         await monthRef.collection('expenses').doc(id).delete();
-        if(undoTimer.current) clearTimeout(undoTimer.current);
-        setUndoToast({id,data,label:name||'支出'});
-        undoTimer.current=setTimeout(()=>setUndoToast(null),5000);
-    },[confirmDel,monthRef]);
+        if (undoTimer.current) clearTimeout(undoTimer.current);
+        setUndoToast({id, data, label:name||'支出'});
+        undoTimer.current = setTimeout(() => setUndoToast(null), 5000);
+    }, [confirmDel, monthRef]);
 
-    const handleUndo=useCallback(async()=>{
-        if(!undoToast) return;
+    const handleUndo = useCallback(async () => {
+        if (!undoToast) return;
         await monthRef.collection('expenses').doc(undoToast.id).set(
-            {...undoToast.data,restoredAt:FieldValue.serverTimestamp()},{merge:true}
+            {...undoToast.data, restoredAt:FieldValue.serverTimestamp()}, {merge:true}
         );
         clearTimeout(undoTimer.current);
         setUndoToast(null);
-        showToast('取り消しました','info');
-    },[undoToast,monthRef,showToast]);
+        showToast('取り消しました', 'info');
+    }, [undoToast, monthRef, showToast]);
 
-    const handleSave=useCallback(async(id,updates)=>{
+    const handleSave = useCallback(async (id, updates) => {
         await monthRef.collection('expenses').doc(id).set(
-            {...updates,updatedAt:FieldValue.serverTimestamp()},{merge:true}
+            {...updates, updatedAt:FieldValue.serverTimestamp()}, {merge:true}
         );
-        showToast('更新しました','success');
-    },[monthRef,showToast]);
+        showToast('更新しました', 'success');
+    }, [monthRef, showToast]);
 
     return (
         <div className="anim-slide">
             <MonthlySummaryCard budget={budget} totalSpent={totalSpent} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
+
             <div className="px-6">
-                {showBudget&&(
+                {/* 別月閲覧バナー */}
+                {!isCurrentMonth && (
+                    <div className="mt-4 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 anim-slide">
+                        <Icon name="calendar" size={16} className="text-amber-500 shrink-0"/>
+                        <p className="text-caption text-amber-700 flex-1">{currentMonth} を表示中</p>
+                        <button onClick={onGoToCurrentMonth}
+                            className="text-caption font-black text-amber-700 bg-amber-100 px-3 py-1.5 rounded-xl active:scale-95 transition-all">
+                            今月へ
+                        </button>
+                    </div>
+                )}
+
+                {showBudget && (
                     <BudgetModal current={budget} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
                 )}
+
                 <ExpenseForm tags={tags} onAdd={handleAdd}/>
-                <div className="space-y-4 content-pb">
+
+                {/* 履歴ヘッダー + フィルター */}
+                <div className="mb-4 space-y-3">
                     <div className="flex justify-between items-center px-2">
                         <h2 className="text-label text-slate-400">最近の履歴</h2>
-                        <span className="text-caption text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">{expenses.length}件</span>
+                        <span className="text-caption text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">
+                            {filterTag ? `${filteredExpenses.length}/${expenses.length}件` : `${expenses.length}件`}
+                        </span>
                     </div>
-                    {expenses.length===0?(
-                        <div className="text-center py-16 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
-                            <Icon name="database" className="mx-auto text-slate-200 mb-3" size={32}/>
-                            <p className="text-label text-slate-400">No Records</p>
+
+                    {/* カテゴリフィルターチップ */}
+                    {usedTags.length > 1 && (
+                        <div className="flex gap-2 overflow-x-auto hide-scroll pb-1">
+                            <button onClick={()=>setFilterTag(null)}
+                                className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${!filterTag?'bg-slate-900 text-white border-transparent':'bg-white border-slate-100 text-slate-400'}`}>
+                                すべて
+                            </button>
+                            {usedTags.map(t => {
+                                const c=tagColor(t), sel=filterTag===t;
+                                return (
+                                    <button key={t} onClick={()=>setFilterTag(sel?null:t)}
+                                        className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${sel?`${c.bg} ${c.text} border-white/20`:'bg-white border-slate-100 text-slate-400'}`}>
+                                        {t}
+                                    </button>
+                                );
+                            })}
                         </div>
-                    ):expenses.map(item=>(
+                    )}
+                </div>
+
+                <div className="space-y-4 content-pb">
+                    {filteredExpenses.length === 0 ? (
+                        <div className="text-center py-16 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
+                            <Icon name={filterTag?'filter':'database'} className="mx-auto text-slate-200 mb-3" size={32}/>
+                            <p className="text-label text-slate-400">{filterTag ? `「${filterTag}」の支出はありません` : 'No Records'}</p>
+                        </div>
+                    ) : filteredExpenses.map(item => (
                         <ExpenseItem key={item.id} item={item} tags={tags}
                             onDelete={(id,name)=>setConfirmDel({id,name})}
                             onSave={handleSave}/>
                     ))}
                 </div>
             </div>
-            {confirmDel&&(
+
+            {confirmDel && (
                 <ConfirmModal message={`「${confirmDel.name}」を削除します`} onOk={handleDeleteConfirmed} onCancel={()=>setConfirmDel(null)}/>
             )}
-            {undoToast&&(
+            {undoToast && (
                 <UndoToast toast={undoToast} onUndo={handleUndo}
-                    onClose={()=>{clearTimeout(undoTimer.current);setUndoToast(null);}}/>
+                    onClose={()=>{ clearTimeout(undoTimer.current); setUndoToast(null); }}/>
             )}
         </div>
     );
 };
 
 // ─── ReportView ───────────────────────────────────────────────────────────────
-// レポート画面。月次概要・カテゴリ別割合バー・カテゴリ別予算管理・支出詳細モーダルを表示する。
-// カテゴリをタップすると、そのカテゴリの支出一覧をボトムシートで確認できる。
-const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase}) => {
-    const [selectedTag,setSelectedTag]=useState(null);
-    const [isAddingTag,setIsAddingTag]=useState(false);
-    const [editingBudgetTag,setEditingBudgetTag]=useState(null);
-    const [tempBudget,setTempBudget]=useState('');
+// レポート画面。月次概要・カテゴリ別割合・予算管理・支出詳細モーダル。
+// カテゴリは支出額の多い順に表示する。
+const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFirebase}) => {
+    const [selectedTag,      setSelectedTag]      = useState(null);
+    const [isAddingTag,      setIsAddingTag]       = useState(false);
+    const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
+    const [tempBudget,       setTempBudget]        = useState('');
 
-    const tagStats=useMemo(()=>{
-        const s={};
-        tags.forEach(t=>{s[t]={spent:0,budget:tagBudgets[t]||0};});
-        expenses.forEach(e=>{
-            if(s[e.tag]) s[e.tag].spent+=e.amount;
-            else s[e.tag]={spent:e.amount,budget:0};
+    const tagStats = useMemo(() => {
+        const s = {};
+        tags.forEach(t => { s[t] = {spent:0, budget:tagBudgets[t]||0}; });
+        expenses.forEach(e => {
+            if (s[e.tag]) s[e.tag].spent += e.amount;
+            else s[e.tag] = {spent:e.amount, budget:0};
         });
         return s;
-    },[expenses,tags,tagBudgets]);
+    }, [expenses, tags, tagBudgets]);
 
-    const totalSpent=useMemo(()=>expenses.reduce((s,e)=>s+e.amount,0),[expenses]);
+    const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
 
-    // 支出があるカテゴリのみ表示
-    const activeTags=useMemo(()=>Object.keys(tagStats).filter(t=>tagStats[t]?.spent>0),[tagStats]);
-    const emptyTags =useMemo(()=>tags.filter(t=>!tagStats[t]?.spent),[tags,tagStats]);
+    // 支出があるカテゴリ（支出額の多い順）
+    const activeTags = useMemo(() =>
+        Object.keys(tagStats)
+            .filter(t => tagStats[t]?.spent > 0)
+            .sort((a,b) => tagStats[b].spent - tagStats[a].spent),
+    [tagStats]);
 
-    const saveTagBudget=useCallback(()=>{
-        if(!editingBudgetTag) return;
-        updateFirebase({tagBudgets:{...tagBudgets,[editingBudgetTag]:Number(tempBudget)}});
+    const emptyTags = useMemo(() => tags.filter(t => !tagStats[t]?.spent), [tags, tagStats]);
+
+    const saveTagBudget = useCallback(() => {
+        if (!editingBudgetTag) return;
+        updateFirebase({tagBudgets:{...tagBudgets, [editingBudgetTag]:Number(tempBudget)}});
         setEditingBudgetTag(null); setTempBudget('');
-    },[editingBudgetTag,tempBudget,tagBudgets,updateFirebase]);
+    }, [editingBudgetTag, tempBudget, tagBudgets, updateFirebase]);
+
+    // 選択カテゴリの支出一覧と合計
+    const selectedExpenses = useMemo(() =>
+        selectedTag ? expenses.filter(e=>e.tag===selectedTag) : [],
+    [expenses, selectedTag]);
+
+    const selectedTotal = useMemo(() =>
+        selectedExpenses.reduce((s,e)=>s+e.amount, 0),
+    [selectedExpenses]);
 
     return (
         <div className="anim-slide px-6 pt-8 content-pb">
@@ -653,7 +792,7 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                         {label:'予算',  value:budget,            color:'text-slate-800'},
                         {label:'支出',  value:totalSpent,        color:'text-rose-500'},
                         {label:'残高',  value:budget-totalSpent, color:(budget-totalSpent)<0?'text-rose-500':'text-emerald-600'},
-                    ].map(({label,value,color})=>(
+                    ].map(({label, value, color}) => (
                         <div key={label} className="bg-slate-50 rounded-2xl p-3 text-center">
                             <p className="text-label text-slate-400 mb-1" style={{fontSize:'9px'}}>{label}</p>
                             <p className={`font-black tabular-nums ${color}`} style={{fontSize:'var(--fs-base)'}}>
@@ -663,20 +802,20 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                     ))}
                 </div>
                 {/* カテゴリ割合バー */}
-                {totalSpent>0&&(
+                {totalSpent > 0 && (
                     <>
                         <p className="text-label text-slate-400 mb-2" style={{fontSize:'9px'}}>カテゴリ別割合</p>
                         <div className="flex h-4 rounded-full overflow-hidden gap-0.5">
-                            {activeTags.map(t=>{
-                                const pct=(tagStats[t].spent/totalSpent)*100;
-                                const c=tagColor(t);
+                            {activeTags.map(t => {
+                                const pct = (tagStats[t].spent/totalSpent)*100;
+                                const c   = tagColor(t);
                                 return <div key={t} title={`${t}: ¥${fmt(tagStats[t].spent)} (${pct.toFixed(1)}%)`}
                                     className={`h-full ${c.bg} bar-anim`} style={{width:`${pct}%`}}/>;
                             })}
                         </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-                            {activeTags.map(t=>{
-                                const c=tagColor(t);
+                            {activeTags.map(t => {
+                                const c = tagColor(t);
                                 return (
                                     <div key={t} className="flex items-center gap-1">
                                         <span className={`w-2 h-2 rounded-full ${c.bg}`}/>
@@ -695,22 +834,27 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                     <span className="w-2 h-2 bg-emerald-500 rounded-full"/> カテゴリ別予算
                 </h3>
                 <div className="space-y-2">
-                    {tags.map(t=>{
-                        const cur=tagBudgets[t]||0;
-                        const isEd=editingBudgetTag===t;
+                    {tags.map(t => {
+                        const cur  = tagBudgets[t] || 0;
+                        const isEd = editingBudgetTag === t;
                         return (
                             <div key={t} className="flex items-center gap-3">
                                 <span className="flex-1 text-body text-slate-700">{t}</span>
-                                {isEd?(
+                                {isEd ? (
                                     <>
                                         <div className="flex items-center gap-1">
                                             <span className="text-caption text-slate-300">¥</span>
-                                            <input type="number" className="w-24 px-2 py-1 text-right text-body border-b-2 border-indigo-500 outline-none bg-transparent tabular-nums" value={tempBudget} onChange={e=>setTempBudget(e.target.value)} autoFocus/>
+                                            <input type="number" inputMode="numeric"
+                                                className="w-24 px-2 py-1 text-right text-body border-b-2 border-indigo-500 outline-none bg-transparent tabular-nums"
+                                                value={tempBudget}
+                                                onChange={e=>setTempBudget(e.target.value)}
+                                                onKeyDown={e=>{ if(e.key==='Enter') saveTagBudget(); }}
+                                                autoFocus/>
                                         </div>
                                         <button onClick={saveTagBudget} className="px-3 py-1.5 text-caption rounded-xl bg-indigo-600 text-white active:scale-95">保存</button>
                                         <button onClick={()=>{setEditingBudgetTag(null);setTempBudget('');}} className="px-2 py-1.5 text-caption text-slate-400">キャンセル</button>
                                     </>
-                                ):(
+                                ) : (
                                     <>
                                         <span className="text-body text-slate-500 w-24 text-right tabular-nums">¥{fmt(cur)}</span>
                                         <button onClick={()=>{setEditingBudgetTag(t);setTempBudget(cur||'');}} className="px-3 py-1.5 text-caption rounded-xl bg-slate-900 text-white active:scale-95">編集</button>
@@ -722,18 +866,18 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                 </div>
             </div>
 
-            {/* 支出があるカテゴリのカード */}
+            {/* カテゴリカード（支出額順） */}
             <div className="space-y-6">
-                {activeTags.length===0&&(
+                {activeTags.length === 0 && (
                     <div className="text-center py-12 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
                         <Icon name="bar-chart-2" className="mx-auto text-slate-200 mb-3" size={32}/>
                         <p className="text-label text-slate-400">まだ支出がありません</p>
                     </div>
                 )}
-                {activeTags.map(t=>{
-                    const {spent,budget:tBudget}=tagStats[t];
-                    const pct=tBudget>0?(spent/tBudget)*100:0;
-                    const isOver=spent>tBudget&&tBudget>0;
+                {activeTags.map(t => {
+                    const {spent, budget:tBudget} = tagStats[t];
+                    const pct    = tBudget > 0 ? (spent/tBudget)*100 : 0;
+                    const isOver = spent > tBudget && tBudget > 0;
                     return (
                         <div key={t} className="bg-white p-7 rounded-[3rem] shadow-sm border border-slate-100 active:bg-slate-50 transition-all cursor-pointer" onClick={()=>setSelectedTag(t)}>
                             <div className="flex justify-between items-start mb-6">
@@ -741,7 +885,7 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                                     <h3 className="font-black text-slate-800 tracking-tight mb-2" style={{fontSize:'var(--fs-xl)'}}>{t}</h3>
                                     <div className={`text-caption flex items-center gap-1.5 ${isOver?'text-rose-500':'text-slate-400'}`}>
                                         <Icon name={isOver?'alert-circle':'check-circle'} size={10}/>
-                                        {tBudget>0?(isOver?`予算超過: ¥${fmt(spent-tBudget)}`:`残り: ¥${fmt(tBudget-spent)}`):'予算未設定'}
+                                        {tBudget>0 ? (isOver?`予算超過: ¥${fmt(spent-tBudget)}`:`残り: ¥${fmt(tBudget-spent)}`) : '予算未設定'}
                                     </div>
                                 </div>
                                 <div className="text-right">
@@ -756,7 +900,7 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                             <div className="flex justify-between items-center pt-4">
                                 <div className="flex items-center gap-2">
                                     <span className="text-label text-slate-400" style={{fontSize:'9px'}}>支出</span>
-                                    <span className="font-black text-slate-800 tabular-nums" style={{fontSize:'var(--fs-base)'}} >¥{fmt(spent)}</span>
+                                    <span className="font-black text-slate-800 tabular-nums" style={{fontSize:'var(--fs-base)'}}>¥{fmt(spent)}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="text-label text-slate-400" style={{fontSize:'9px'}}>予算</span>
@@ -766,20 +910,22 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                         </div>
                     );
                 })}
-                {/* 支出なしカテゴリ（折りたたみ表示） */}
-                {emptyTags.length>0&&(
+
+                {/* 支出なしカテゴリ */}
+                {emptyTags.length > 0 && (
                     <details className="group">
                         <summary className="list-none cursor-pointer flex items-center gap-2 text-label text-slate-400 px-2 mb-3">
                             <Icon name="chevron-right" size={14} className="group-open:rotate-90 transition-transform"/>
                             支出なしのカテゴリ（{emptyTags.length}件）
                         </summary>
                         <div className="flex flex-wrap gap-2 px-2">
-                            {emptyTags.map(t=>{const c=tagColor(t);return(
+                            {emptyTags.map(t => { const c=tagColor(t); return (
                                 <span key={t} className={`px-4 py-2 rounded-xl text-caption ${c.bg} ${c.text}`}>{t}</span>
                             );})}
                         </div>
                     </details>
                 )}
+
                 <button onClick={()=>setIsAddingTag(true)}
                     className="w-full py-10 border-4 border-dashed border-slate-200 rounded-[3rem] text-slate-300 font-black flex flex-col items-center gap-3 hover:bg-white hover:border-indigo-300 hover:text-indigo-400 transition-all">
                     <Icon name="plus" size={32}/>
@@ -787,36 +933,42 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                 </button>
             </div>
 
-            {/* タグ詳細モーダル */}
-            {selectedTag&&(
+            {/* カテゴリ詳細モーダル */}
+            {selectedTag && (
                 <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl z-[100] flex items-end justify-center anim-fade">
                     <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup flex flex-col max-h-[85vh]">
-                        <div className="p-8 pb-4 flex justify-between items-center shrink-0">
+                        <div className="p-8 pb-4 flex justify-between items-start shrink-0">
                             <div>
                                 <h3 className="font-black text-slate-800 tracking-tighter" style={{fontSize:'var(--fs-2xl)'}}>{selectedTag}</h3>
                                 <p className="text-label text-slate-400" style={{fontSize:'9px'}}>History & Details</p>
+                                {/* カテゴリ合計 */}
+                                <div className="flex items-baseline gap-2 mt-2">
+                                    <span className="text-label text-slate-400" style={{fontSize:'9px'}}>合計</span>
+                                    <span className="font-black text-slate-800 tabular-nums" style={{fontSize:'var(--fs-lg)'}}>¥{fmt(selectedTotal)}</span>
+                                    <span className="text-caption text-slate-400">（{selectedExpenses.length}件）</span>
+                                </div>
                             </div>
                             <button onClick={()=>setSelectedTag(null)} className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-all">
                                 <Icon name="x" size={24}/>
                             </button>
                         </div>
-                        <div className="px-8 flex-grow overflow-y-auto hide-scroll space-y-4 pb-12 pt-4">
-                            {expenses.filter(e=>e.tag===selectedTag).length>0?(
-                                expenses.filter(e=>e.tag===selectedTag).map(item=>(
-                                    <div key={item.id} className="flex justify-between items-center p-5 bg-slate-50 rounded-[2rem] border border-slate-100">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-500 shadow-sm border border-slate-100">
-                                                <Icon name="receipt" size={20}/>
+                        <div className="px-8 flex-grow overflow-y-auto hide-scroll space-y-3 pb-12 pt-4">
+                            {selectedExpenses.length > 0 ? (
+                                selectedExpenses.map(item => (
+                                    <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-[2rem] border border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center text-indigo-500 shadow-sm border border-slate-100">
+                                                <Icon name="receipt" size={18}/>
                                             </div>
                                             <div>
                                                 <p className="text-body text-slate-800">{item.name}</p>
-                                                <p className="text-caption text-slate-400">{fmtDate(item)}</p>
+                                                <p className="text-caption text-slate-400">{fmtRelativeDate(item)}</p>
                                             </div>
                                         </div>
-                                        <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-lg)'}}>¥{fmt(item.amount)}</p>
+                                        <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-base)'}}>¥{fmt(item.amount)}</p>
                                     </div>
                                 ))
-                            ):(
+                            ) : (
                                 <div className="py-20 text-center opacity-30">
                                     <Icon name="database" size={48} className="mx-auto mb-3"/>
                                     <p className="text-label">No Data</p>
@@ -827,41 +979,44 @@ const ReportView = ({currentMonth,budget,tagBudgets,expenses,tags,updateFirebase
                 </div>
             )}
 
-            {isAddingTag&&<AddTagModal tags={tags} onAdd={name=>updateFirebase({tags:[...tags,name]})} onClose={()=>setIsAddingTag(false)}/>}
+            {isAddingTag && <AddTagModal tags={tags} onAdd={name=>updateFirebase({tags:[...tags,name]})} onClose={()=>setIsAddingTag(false)}/>}
         </div>
     );
 };
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
-// 設定画面。カテゴリの追加・削除、支出データの CSV エクスポート、アプリ情報を管理する。
-// 支出に使用中のカテゴリは削除できない（誤操作防止）。
-const SettingsView = ({tags,tagBudgets,expenses,budget,updateFirebase,showToast}) => {
-    const [confirmDelete,setConfirmDelete]=useState(null);
-    const [isAddingTag,setIsAddingTag]=useState(false);
+// 設定画面。カテゴリ管理（予算額も表示）・CSVエクスポート・アプリ情報。
+const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, showToast}) => {
+    const [confirmDelete, setConfirmDelete] = useState(null);
+    const [isAddingTag,   setIsAddingTag]   = useState(false);
 
-    const handleDeleteTag=useCallback((tag)=>{
-        const updated=tags.filter(t=>t!==tag);
-        const newBudgets={...tagBudgets};
+    const handleDeleteTag = useCallback((tag) => {
+        const updated    = tags.filter(t=>t!==tag);
+        const newBudgets = {...tagBudgets};
         delete newBudgets[tag];
-        updateFirebase({tags:updated,tagBudgets:newBudgets});
+        updateFirebase({tags:updated, tagBudgets:newBudgets});
         setConfirmDelete(null);
-        showToast(`「${tag}」を削除しました`,'info');
-    },[tags,tagBudgets,updateFirebase,showToast]);
+        showToast(`「${tag}」を削除しました`, 'info');
+    }, [tags, tagBudgets, updateFirebase, showToast]);
 
-    // CSVエクスポート
-    const handleExport=useCallback(()=>{
-        const header='日付,品目,カテゴリ,金額';
-        const rows=expenses.map(e=>{
-            const d=typeof e.createdAtMillis==='number'?new Date(e.createdAtMillis).toLocaleDateString('ja-JP'):'';
+    const handleExport = useCallback(() => {
+        const header = '日付,品目,カテゴリ,金額';
+        const rows   = expenses.map(e => {
+            const d = typeof e.createdAtMillis==='number' ? new Date(e.createdAtMillis).toLocaleDateString('ja-JP') : '';
             return `${d},"${e.name}","${e.tag}",${e.amount}`;
         });
-        const csv=[header,...rows].join('\n');
-        const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a'); a.href=url; a.download='kakeibo.csv'; a.click();
+        const csv  = [header, ...rows].join('\n');
+        const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href=url; a.download='kakeibo.csv'; a.click();
         URL.revokeObjectURL(url);
-        showToast('CSVをダウンロードしました','success');
-    },[expenses,showToast]);
+        showToast('CSVをダウンロードしました', 'success');
+    }, [expenses, showToast]);
+
+    const totalTagBudget = useMemo(() =>
+        Object.values(tagBudgets).reduce((s,v)=>s+Number(v||0), 0),
+    [tagBudgets]);
 
     return (
         <div className="anim-slide px-6 pt-8 content-pb">
@@ -882,19 +1037,24 @@ const SettingsView = ({tags,tagBudgets,expenses,budget,updateFirebase,showToast}
                     </button>
                 </div>
                 <div className="space-y-2">
-                    {tags.map((t,i)=>{
-                        const c=tagColor(t);
-                        const inUse=expenses.some(e=>e.tag===t);
+                    {tags.map(t => {
+                        const c     = tagColor(t);
+                        const inUse = expenses.some(e=>e.tag===t);
+                        const bgt   = tagBudgets[t] || 0;
                         return (
                             <div key={t} className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
                                 <span className={`w-3 h-3 rounded-full ${c.bg} shrink-0`}/>
                                 <span className="flex-1 text-body text-slate-700">{t}</span>
-                                {inUse&&<span className="text-caption text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-200">使用中</span>}
+                                {bgt > 0 && (
+                                    <span className="text-caption text-slate-400 tabular-nums">¥{fmt(bgt)}</span>
+                                )}
+                                {inUse && (
+                                    <span className="text-caption text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-200">使用中</span>
+                                )}
                                 <button
-                                    onClick={()=>setConfirmDelete({tag:t,inUse})}
-                                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${inUse?'text-slate-300 bg-slate-100 cursor-not-allowed':'text-rose-400 bg-rose-50 hover:bg-rose-100 active:scale-90'}`}
+                                    onClick={()=>setConfirmDelete({tag:t, inUse})}
                                     disabled={inUse}
-                                >
+                                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${inUse?'text-slate-300 bg-slate-100 cursor-not-allowed':'text-rose-400 bg-rose-50 hover:bg-rose-100 active:scale-90'}`}>
                                     <Icon name="trash-2" size={14}/>
                                 </button>
                             </div>
@@ -927,48 +1087,52 @@ const SettingsView = ({tags,tagBudgets,expenses,budget,updateFirebase,showToast}
                     <span className="w-2 h-2 bg-violet-500 rounded-full"/> アプリ情報
                 </h3>
                 <div className="space-y-3 text-body text-slate-500">
-                    <div className="flex justify-between"><span>バージョン</span><span className="text-slate-800 font-black">3.0.0</span></div>
+                    <div className="flex justify-between"><span>バージョン</span><span className="text-slate-800 font-black">{APP_VERSION}</span></div>
                     <div className="flex justify-between"><span>登録件数</span><span className="text-slate-800 font-black">{expenses.length} 件</span></div>
                     <div className="flex justify-between"><span>今月の予算</span><span className="text-slate-800 font-black">¥{fmt(budget)}</span></div>
+                    <div className="flex justify-between"><span>カテゴリ予算合計</span><span className="text-slate-800 font-black">¥{fmt(totalTagBudget)}</span></div>
+                    <div className="flex justify-between"><span>カテゴリ数</span><span className="text-slate-800 font-black">{tags.length} 個</span></div>
                 </div>
             </div>
 
-            {/* カテゴリ追加モーダル */}
-            {isAddingTag&&<AddTagModal tags={tags} onAdd={name=>{updateFirebase({tags:[...tags,name]});showToast(`「${name}」を追加しました`,'success');}} onClose={()=>setIsAddingTag(false)}/>}
-
-            {/* カテゴリ削除確認 */}
-            {confirmDelete&&(
+            {isAddingTag && (
+                <AddTagModal tags={tags}
+                    onAdd={name=>{ updateFirebase({tags:[...tags,name]}); showToast(`「${name}」を追加しました`,'success'); }}
+                    onClose={()=>setIsAddingTag(false)}/>
+            )}
+            {confirmDelete && (
                 <ConfirmModal
                     message={`「${confirmDelete.tag}」を削除します`}
                     onOk={()=>handleDeleteTag(confirmDelete.tag)}
-                    onCancel={()=>setConfirmDelete(null)}
-                />
+                    onCancel={()=>setConfirmDelete(null)}/>
             )}
         </div>
     );
 };
 
 // ─── MonthHeader ──────────────────────────────────────────────────────────────
-// 画面上部の月選択ヘッダー。左右矢印で前後月に移動、月名タップで前後2ヶ月のクイック選択を表示する。
-// オフライン時は警告バナーを表示する。
-const MonthHeader = ({currentMonth,onChangeMonth,onSetMonth,isOnline}) => {
-    const [pickerOpen,setPickerOpen]=useState(false);
-    const {year,month}=useMemo(()=>{
-        const [y,m]=currentMonth.split('-');
-        return {year:y,month:parseInt(m)};
-    },[currentMonth]);
+// 月選択ヘッダー。クイックピッカーは前後2ヶ月＋年表示付き。
+const MonthHeader = ({currentMonth, onChangeMonth, onSetMonth, isOnline}) => {
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const {year, month} = useMemo(() => {
+        const [y,m] = currentMonth.split('-');
+        return {year:parseInt(y), month:parseInt(m)};
+    }, [currentMonth]);
 
-    const quickOptions=useMemo(()=>{
-        const [y,m]=currentMonth.split('-').map(Number);
-        return Array.from({length:5},(_,i)=>{
-            const d=new Date(y,m-1+i-2,1);
-            return {year:d.getFullYear(),month:d.getMonth()+1};
+    const todayMonth = monthStr();
+    const isCurrentMonth = currentMonth === todayMonth;
+
+    const quickOptions = useMemo(() => {
+        const [y,m] = currentMonth.split('-').map(Number);
+        return Array.from({length:5}, (_,i) => {
+            const d = new Date(y, m-1+i-2, 1);
+            return {year:d.getFullYear(), month:d.getMonth()+1};
         });
-    },[currentMonth]);
+    }, [currentMonth]);
 
     return (
         <>
-            {!isOnline&&<div className="offline-banner">⚠ オフライン — データは同期されません</div>}
+            {!isOnline && <div className="offline-banner">⚠ オフライン — データは同期されません</div>}
             <div className="glass-nav text-white px-2 py-6 flex flex-col gap-4 shadow-xl sticky top-0 z-[60] rounded-b-[2rem]">
                 <div className="flex justify-between items-center px-6">
                     <button onClick={()=>onChangeMonth(-1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10">
@@ -977,23 +1141,42 @@ const MonthHeader = ({currentMonth,onChangeMonth,onSetMonth,isOnline}) => {
                     <div className="flex flex-col items-center cursor-pointer" onClick={()=>setPickerOpen(p=>!p)}>
                         <p className="text-label text-indigo-200 mb-1" style={{fontSize:'10px'}}>{year}</p>
                         <div className="flex items-center gap-3">
-                            <span className="font-black tracking-tighter leading-none" style={{fontSize:'var(--fs-3xl)'}}>{month}<span className="opacity-60 ml-1" style={{fontSize:'var(--fs-xl)'}}>月</span></span>
+                            <span className="font-black tracking-tighter leading-none" style={{fontSize:'var(--fs-3xl)'}}>
+                                {month}<span className="opacity-60 ml-1" style={{fontSize:'var(--fs-xl)'}}>月</span>
+                            </span>
                             <Icon name={pickerOpen?'chevron-up':'chevron-down'} size={20} className="text-indigo-300"/>
                         </div>
+                        {!isCurrentMonth && (
+                            <button
+                                onClick={e=>{ e.stopPropagation(); const [y,m]=todayMonth.split('-').map(Number); onSetMonth(y,m); setPickerOpen(false); }}
+                                className="mt-1 text-label text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-full border border-amber-300/30 hover:bg-amber-400/30 transition-all"
+                                style={{fontSize:'9px'}}>
+                                今月へ戻る
+                            </button>
+                        )}
                     </div>
                     <button onClick={()=>onChangeMonth(1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10">
                         <Icon name="chevron-right" size={32}/>
                     </button>
                 </div>
-                {pickerOpen&&(
+                {pickerOpen && (
                     <div className="px-4 py-2 flex flex-wrap justify-center gap-2 anim-slide">
-                        {quickOptions.map((opt,i)=>(
-                            <button key={i}
-                                onClick={()=>{onSetMonth(opt.year,opt.month);setPickerOpen(false);}}
-                                className={`px-4 py-2 rounded-xl text-caption transition-all border ${opt.month===month&&opt.year===parseInt(year)?'bg-white text-indigo-700 shadow-lg':'bg-indigo-600/50 text-white border-white/10 hover:bg-indigo-500'}`}>
-                                {opt.month}月
-                            </button>
-                        ))}
+                        {quickOptions.map((opt,i) => {
+                            const optStr = `${opt.year}-${String(opt.month).padStart(2,'0')}`;
+                            const isToday = optStr === todayMonth;
+                            const isSel   = opt.month===month && opt.year===year;
+                            return (
+                                <button key={i}
+                                    onClick={()=>{ onSetMonth(opt.year,opt.month); setPickerOpen(false); }}
+                                    className={`px-4 py-2 rounded-xl text-caption transition-all border relative ${isSel?'bg-white text-indigo-700 shadow-lg border-transparent':'bg-indigo-600/50 text-white border-white/10 hover:bg-indigo-500'}`}>
+                                    {opt.year !== year && (
+                                        <span className="block text-center opacity-60" style={{fontSize:'8px',lineHeight:'1'}}>{opt.year}</span>
+                                    )}
+                                    {opt.month}月
+                                    {isToday && <span className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-amber-400 rounded-full border-2 border-indigo-700"/>}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
             </div>
@@ -1002,52 +1185,65 @@ const MonthHeader = ({currentMonth,onChangeMonth,onSetMonth,isOnline}) => {
 };
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-// アプリのルートコンポーネント。月・ビュー状態を管理し、MonthHeader + 各ビュー + ボトムナビを組み合わせる。
-const NAV_ITEMS=[
-    {id:'home',    icon:'home',     label:'Home'},
-    {id:'report',  icon:'pie-chart',label:'Report'},
-    {id:'settings',icon:'settings', label:'Settings'},
+const NAV_ITEMS = [
+    {id:'home',     icon:'home',      label:'Home'},
+    {id:'report',   icon:'pie-chart', label:'Report'},
+    {id:'settings', icon:'settings',  label:'Settings'},
 ];
 
 const App = () => {
-    const [view,setView]=useState('home');
-    const [currentMonth,setCurrentMonth]=useState(()=>monthStr());
-    const [toast,setToast]=useState(null);
-    const toastTimer=useRef(null);
+    const [view,         setView]         = useState('home');
+    const [currentMonth, setCurrentMonth] = useState(() => monthStr());
+    const [toast,        setToast]        = useState(null);
+    const toastTimer  = useRef(null);
+    const scrollRef   = useRef(null);
 
-    const {budget,tagBudgets,expenses,tags,updateFirebase,monthRef,isOnline}=useMonthData(currentMonth);
+    const {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
 
-    const showToast=useCallback((message,type='success')=>{
-        if(toastTimer.current) clearTimeout(toastTimer.current);
-        setToast({message,type});
-        toastTimer.current=setTimeout(()=>setToast(null),2500);
-    },[]);
+    const showToast = useCallback((message, type='success') => {
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        setToast({message, type});
+        toastTimer.current = setTimeout(() => setToast(null), 2500);
+    }, []);
 
-    const changeMonth=useCallback((offset)=>{
-        const [y,m]=currentMonth.split('-').map(Number);
-        const d=new Date(y,m-1+offset,1);
+    const changeMonth = useCallback((offset) => {
+        const [y,m] = currentMonth.split('-').map(Number);
+        const d = new Date(y, m-1+offset, 1);
         setCurrentMonth(monthStr(d));
-    },[currentMonth]);
+    }, [currentMonth]);
 
-    const setSpecificMonth=useCallback((y,m)=>{
+    const setSpecificMonth = useCallback((y,m) => {
         setCurrentMonth(`${y}-${String(m).padStart(2,'0')}`);
-    },[]);
+    }, []);
 
-    const commonProps={budget,tagBudgets,expenses,tags,updateFirebase,monthRef,showToast,currentMonth};
+    // タブ切替時にスクロールを先頭へ
+    useEffect(() => {
+        scrollRef.current?.scrollTo({top:0, behavior:'smooth'});
+    }, [view]);
+
+    const goToCurrentMonth = useCallback(() => setCurrentMonth(monthStr()), []);
+
+    const commonProps = {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, showToast, currentMonth};
 
     return (
         <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl flex flex-col relative overflow-x-hidden">
             <MonthHeader currentMonth={currentMonth} onChangeMonth={changeMonth} onSetMonth={setSpecificMonth} isOnline={isOnline}/>
 
-            <div className="flex-grow">
-                {view==='home'    && <HomeView     {...commonProps}/>}
-                {view==='report'  && <ReportView   {...commonProps} currentMonth={currentMonth}/>}
-                {view==='settings'&& <SettingsView {...commonProps}/>}
+            <div ref={scrollRef} className="flex-grow overflow-y-auto hide-scroll">
+                {isLoading ? (
+                    <LoadingView/>
+                ) : (
+                    <>
+                        {view==='home'     && <HomeView     {...commonProps} onGoToCurrentMonth={goToCurrentMonth}/>}
+                        {view==='report'   && <ReportView   {...commonProps}/>}
+                        {view==='settings' && <SettingsView {...commonProps}/>}
+                    </>
+                )}
             </div>
 
-            {/* ボトムナビ（Safe Area対応） */}
+            {/* ボトムナビ */}
             <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-slate-900/90 backdrop-blur-2xl flex justify-around items-center z-50 shadow-2xl border-t border-white/10 bottom-nav px-4 pt-3">
-                {NAV_ITEMS.map(({id,icon,label})=>(
+                {NAV_ITEMS.map(({id, icon, label}) => (
                     <button key={id} onClick={()=>setView(id)}
                         className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-[2rem] transition-all ${view===id?'bg-indigo-600 text-white shadow-xl scale-105':'text-slate-500 hover:text-slate-300'}`}>
                         <Icon name={icon} size={22}/>
@@ -1056,8 +1252,7 @@ const App = () => {
                 ))}
             </div>
 
-            {/* グローバルトースト */}
-            {toast&&<Toast message={toast.message} type={toast.type} onClose={()=>{clearTimeout(toastTimer.current);setToast(null);}}/>}
+            {toast && <Toast message={toast.message} type={toast.type} onClose={()=>{ clearTimeout(toastTimer.current); setToast(null); }}/>}
         </div>
     );
 };
