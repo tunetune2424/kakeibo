@@ -145,6 +145,9 @@ const Icon = ({name, size=20, className=''}) => (
     <i className={`lucide-${name} ${className}`} style={{fontSize:size,width:size,height:size,display:'inline-block'}}/>
 );
 
+// overflow や transform を持つ親コンテナの fixed 崩れを防ぐポータル
+const Portal = ({children}) => ReactDOM.createPortal(children, document.body);
+
 const ConfirmModal = ({message, onOk, onCancel}) => (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-6 anim-fade">
         <div className="bg-white w-full max-w-xs p-8 rounded-[3rem] shadow-2xl anim-zoom text-center">
@@ -717,12 +720,52 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
             </div>
 
             {confirmDel && (
-                <ConfirmModal message={`「${confirmDel.name}」を削除します`} onOk={handleDeleteConfirmed} onCancel={()=>setConfirmDel(null)}/>
+                <Portal><ConfirmModal message={`「${confirmDel.name}」を削除します`} onOk={handleDeleteConfirmed} onCancel={()=>setConfirmDel(null)}/></Portal>
             )}
             {undoToast && (
-                <UndoToast toast={undoToast} onUndo={handleUndo}
-                    onClose={()=>{ clearTimeout(undoTimer.current); setUndoToast(null); }}/>
+                <Portal><UndoToast toast={undoToast} onUndo={handleUndo}
+                    onClose={()=>{ clearTimeout(undoTimer.current); setUndoToast(null); }}/></Portal>
             )}
+        </div>
+    );
+};
+
+// ─── TagBudgetModal ───────────────────────────────────────────────────────────
+// カテゴリ予算編集用ボトムシートモーダル
+const TagBudgetModal = ({tag, current, onSave, onClose}) => {
+    const [val, setVal] = useState(current || '');
+    const handleSave = () => { onSave(Number(val)); onClose(); };
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
+            <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10"
+                 onClick={e=>e.stopPropagation()}>
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"/>
+                <p className="text-label text-slate-400 text-center mb-1" style={{fontSize:'10px'}}>カテゴリ予算を設定</p>
+                <h3 className="font-black text-slate-800 text-center tracking-tighter mb-8" style={{fontSize:'var(--fs-xl)'}}>{tag}</h3>
+                <div className="relative mb-8">
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
+                    <input type="number" inputMode="numeric"
+                        className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800 text-center"
+                        style={{fontSize:'var(--fs-3xl)'}}
+                        value={val}
+                        onChange={e=>setVal(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
+                        autoFocus/>
+                </div>
+                <div className="flex flex-col gap-3">
+                    <button onClick={handleSave}
+                        className="w-full py-5 rounded-2xl font-black bg-indigo-600 text-white shadow-lg shadow-indigo-100 active:scale-95 transition-all">
+                        この金額で確定する
+                    </button>
+                    {current > 0 && (
+                        <button onClick={()=>{ onSave(0); onClose(); }}
+                            className="w-full py-4 rounded-2xl font-black border-2 border-slate-200 text-slate-400 active:scale-95 transition-all">
+                            予算を削除する
+                        </button>
+                    )}
+                    <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption text-center">キャンセル</button>
+                </div>
+            </div>
         </div>
     );
 };
@@ -734,7 +777,6 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
     const [selectedTag,      setSelectedTag]      = useState(null);
     const [isAddingTag,      setIsAddingTag]       = useState(false);
     const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
-    const [tempBudget,       setTempBudget]        = useState('');
 
     const tagStats = useMemo(() => {
         const s = {};
@@ -757,11 +799,10 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
 
     const emptyTags = useMemo(() => tags.filter(t => !tagStats[t]?.spent), [tags, tagStats]);
 
-    const saveTagBudget = useCallback(() => {
+    const saveTagBudget = useCallback((val) => {
         if (!editingBudgetTag) return;
-        updateFirebase({tagBudgets:{...tagBudgets, [editingBudgetTag]:Number(tempBudget)}});
-        setEditingBudgetTag(null); setTempBudget('');
-    }, [editingBudgetTag, tempBudget, tagBudgets, updateFirebase]);
+        updateFirebase({tagBudgets:{...tagBudgets, [editingBudgetTag]:val}});
+    }, [editingBudgetTag, tagBudgets, updateFirebase]);
 
     // 選択カテゴリの支出一覧と合計
     const selectedExpenses = useMemo(() =>
@@ -835,31 +876,24 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
                 </h3>
                 <div className="space-y-2">
                     {tags.map(t => {
-                        const cur  = tagBudgets[t] || 0;
-                        const isEd = editingBudgetTag === t;
+                        const cur   = tagBudgets[t] || 0;
+                        const spent = tagStats[t]?.spent || 0;
+                        const c     = tagColor(t);
                         return (
-                            <div key={t} className="flex items-center gap-3">
-                                <span className="flex-1 text-body text-slate-700">{t}</span>
-                                {isEd ? (
-                                    <>
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-caption text-slate-300">¥</span>
-                                            <input type="number" inputMode="numeric"
-                                                className="w-24 px-2 py-1 text-right text-body border-b-2 border-indigo-500 outline-none bg-transparent tabular-nums"
-                                                value={tempBudget}
-                                                onChange={e=>setTempBudget(e.target.value)}
-                                                onKeyDown={e=>{ if(e.key==='Enter') saveTagBudget(); }}
-                                                autoFocus/>
-                                        </div>
-                                        <button onClick={saveTagBudget} className="px-3 py-1.5 text-caption rounded-xl bg-indigo-600 text-white active:scale-95">保存</button>
-                                        <button onClick={()=>{setEditingBudgetTag(null);setTempBudget('');}} className="px-2 py-1.5 text-caption text-slate-400">キャンセル</button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="text-body text-slate-500 w-24 text-right tabular-nums">¥{fmt(cur)}</span>
-                                        <button onClick={()=>{setEditingBudgetTag(t);setTempBudget(cur||'');}} className="px-3 py-1.5 text-caption rounded-xl bg-slate-900 text-white active:scale-95">編集</button>
-                                    </>
-                                )}
+                            <div key={t} className="flex items-center gap-2 p-3 bg-slate-50 rounded-2xl">
+                                <button onClick={()=>setSelectedTag(t)}
+                                    className="flex-1 flex items-center gap-3 text-left active:opacity-70 transition-opacity min-w-0">
+                                    <span className={`w-2.5 h-2.5 rounded-full ${c.bg} shrink-0`}/>
+                                    <span className="text-body text-slate-700 flex-1 truncate">{t}</span>
+                                    {spent > 0 && (
+                                        <span className="text-caption text-rose-400 tabular-nums shrink-0">¥{fmt(spent)}</span>
+                                    )}
+                                </button>
+                                <button onClick={()=>setEditingBudgetTag(t)}
+                                    className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-caption text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 active:scale-95 transition-all">
+                                    <Icon name="edit-3" size={11}/>
+                                    {cur > 0 ? `¥${fmt(cur)}` : '予算設定'}
+                                </button>
                             </div>
                         );
                     })}
@@ -935,51 +969,61 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
 
             {/* カテゴリ詳細モーダル */}
             {selectedTag && (
-                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl z-[100] flex items-end justify-center anim-fade">
-                    <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup flex flex-col max-h-[85vh]">
-                        <div className="p-8 pb-4 flex justify-between items-start shrink-0">
-                            <div>
-                                <h3 className="font-black text-slate-800 tracking-tighter" style={{fontSize:'var(--fs-2xl)'}}>{selectedTag}</h3>
-                                <p className="text-label text-slate-400" style={{fontSize:'9px'}}>History & Details</p>
-                                {/* カテゴリ合計 */}
-                                <div className="flex items-baseline gap-2 mt-2">
-                                    <span className="text-label text-slate-400" style={{fontSize:'9px'}}>合計</span>
-                                    <span className="font-black text-slate-800 tabular-nums" style={{fontSize:'var(--fs-lg)'}}>¥{fmt(selectedTotal)}</span>
-                                    <span className="text-caption text-slate-400">（{selectedExpenses.length}件）</span>
-                                </div>
-                            </div>
-                            <button onClick={()=>setSelectedTag(null)} className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-all">
-                                <Icon name="x" size={24}/>
-                            </button>
-                        </div>
-                        <div className="px-8 flex-grow overflow-y-auto hide-scroll space-y-3 pb-12 pt-4">
-                            {selectedExpenses.length > 0 ? (
-                                selectedExpenses.map(item => (
-                                    <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-[2rem] border border-slate-100">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center text-indigo-500 shadow-sm border border-slate-100">
-                                                <Icon name="receipt" size={18}/>
-                                            </div>
-                                            <div>
-                                                <p className="text-body text-slate-800">{item.name}</p>
-                                                <p className="text-caption text-slate-400">{fmtRelativeDate(item)}</p>
-                                            </div>
-                                        </div>
-                                        <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-base)'}}>¥{fmt(item.amount)}</p>
+                <Portal>
+                    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl z-[100] flex items-end justify-center anim-fade">
+                        <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup flex flex-col max-h-[85vh]">
+                            <div className="p-8 pb-4 flex justify-between items-start shrink-0">
+                                <div>
+                                    <h3 className="font-black text-slate-800 tracking-tighter" style={{fontSize:'var(--fs-2xl)'}}>{selectedTag}</h3>
+                                    <p className="text-label text-slate-400" style={{fontSize:'9px'}}>History & Details</p>
+                                    <div className="flex items-baseline gap-2 mt-2">
+                                        <span className="text-label text-slate-400" style={{fontSize:'9px'}}>合計</span>
+                                        <span className="font-black text-slate-800 tabular-nums" style={{fontSize:'var(--fs-lg)'}}>¥{fmt(selectedTotal)}</span>
+                                        <span className="text-caption text-slate-400">（{selectedExpenses.length}件）</span>
                                     </div>
-                                ))
-                            ) : (
-                                <div className="py-20 text-center opacity-30">
-                                    <Icon name="database" size={48} className="mx-auto mb-3"/>
-                                    <p className="text-label">No Data</p>
                                 </div>
-                            )}
+                                <button onClick={()=>setSelectedTag(null)} className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-all">
+                                    <Icon name="x" size={24}/>
+                                </button>
+                            </div>
+                            <div className="px-8 flex-grow overflow-y-auto hide-scroll space-y-3 pb-12 pt-4">
+                                {selectedExpenses.length > 0 ? (
+                                    selectedExpenses.map(item => (
+                                        <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-[2rem] border border-slate-100">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center text-indigo-500 shadow-sm border border-slate-100">
+                                                    <Icon name="receipt" size={18}/>
+                                                </div>
+                                                <div>
+                                                    <p className="text-body text-slate-800">{item.name}</p>
+                                                    <p className="text-caption text-slate-400">{fmtRelativeDate(item)}</p>
+                                                </div>
+                                            </div>
+                                            <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-base)'}}>¥{fmt(item.amount)}</p>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="py-20 text-center opacity-30">
+                                        <Icon name="database" size={48} className="mx-auto mb-3"/>
+                                        <p className="text-label">No Data</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
-                </div>
+                </Portal>
             )}
 
-            {isAddingTag && <AddTagModal tags={tags} onAdd={name=>updateFirebase({tags:[...tags,name]})} onClose={()=>setIsAddingTag(false)}/>}
+            {isAddingTag && <Portal><AddTagModal tags={tags} onAdd={name=>updateFirebase({tags:[...tags,name]})} onClose={()=>setIsAddingTag(false)}/></Portal>}
+            {editingBudgetTag && (
+                <Portal>
+                    <TagBudgetModal
+                        tag={editingBudgetTag}
+                        current={tagBudgets[editingBudgetTag] || 0}
+                        onSave={saveTagBudget}
+                        onClose={()=>setEditingBudgetTag(null)}/>
+                </Portal>
+            )}
         </div>
     );
 };
@@ -1096,15 +1140,15 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, showT
             </div>
 
             {isAddingTag && (
-                <AddTagModal tags={tags}
+                <Portal><AddTagModal tags={tags}
                     onAdd={name=>{ updateFirebase({tags:[...tags,name]}); showToast(`「${name}」を追加しました`,'success'); }}
-                    onClose={()=>setIsAddingTag(false)}/>
+                    onClose={()=>setIsAddingTag(false)}/></Portal>
             )}
             {confirmDelete && (
-                <ConfirmModal
+                <Portal><ConfirmModal
                     message={`「${confirmDelete.tag}」を削除します`}
                     onOk={()=>handleDeleteTag(confirmDelete.tag)}
-                    onCancel={()=>setConfirmDelete(null)}/>
+                    onCancel={()=>setConfirmDelete(null)}/></Portal>
             )}
         </div>
     );
@@ -1252,7 +1296,7 @@ const App = () => {
                 ))}
             </div>
 
-            {toast && <Toast message={toast.message} type={toast.type} onClose={()=>{ clearTimeout(toastTimer.current); setToast(null); }}/>}
+            {toast && <Portal><Toast message={toast.message} type={toast.type} onClose={()=>{ clearTimeout(toastTimer.current); setToast(null); }}/></Portal>}
         </div>
     );
 };
