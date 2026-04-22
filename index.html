@@ -671,11 +671,27 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
     }, [undoToast, monthRef, showToast]);
 
     const handleSave = useCallback(async (id, updates) => {
-        await monthRef.collection('expenses').doc(id).set(
-            {...updates, updatedAt:FieldValue.serverTimestamp()}, {merge:true}
-        );
-        showToast('更新しました', 'success');
-    }, [monthRef, showToast]);
+        const newMonth = typeof updates.createdAtMillis === 'number'
+            ? monthStr(new Date(updates.createdAtMillis))
+            : currentMonth;
+
+        if (newMonth !== currentMonth) {
+            // 別月に移動: 元月から削除 → 新月に追加
+            const batch = db.batch();
+            batch.delete(monthRef.collection('expenses').doc(id));
+            batch.set(
+                db.collection('months').doc(newMonth).collection('expenses').doc(id),
+                {...updates, updatedAt:FieldValue.serverTimestamp()}
+            );
+            await batch.commit();
+            showToast(`${newMonth} に移動しました`, 'info');
+        } else {
+            await monthRef.collection('expenses').doc(id).set(
+                {...updates, updatedAt:FieldValue.serverTimestamp()}, {merge:true}
+            );
+            showToast('更新しました', 'success');
+        }
+    }, [monthRef, showToast, currentMonth]);
 
     return (
         <div className="anim-slide">
