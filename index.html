@@ -117,6 +117,16 @@ const fmt     = (n) => Math.abs(Number(n)).toLocaleString('ja-JP');
 const nowMs   = () => Date.now();
 const monthStr = (d=new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 
+const toLocalDateStr = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+const fromLocalDateStr = (str, originalMs) => {
+    const [y,m,day] = str.split('-').map(Number);
+    const orig = new Date(originalMs ?? Date.now());
+    return new Date(y, m-1, day, orig.getHours(), orig.getMinutes(), orig.getSeconds()).getTime();
+};
+
 // 絶対日時フォーマット（レガシー互換）
 const fmtDate = (item) => {
     if (typeof item?.createdAtMillis === 'number')
@@ -519,17 +529,24 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
     const [name,    setName]    = useState(item.name);
     const [amount,  setAmount]  = useState(item.amount);
     const [tag,     setTag]     = useState(item.tag);
+    const [dateStr, setDateStr] = useState(() =>
+        typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now())
+    );
     const c = tagColor(item.tag);
 
     useEffect(() => {
-        if (!editing) { setName(item.name); setAmount(item.amount); setTag(item.tag); }
-    }, [item.name, item.amount, item.tag, editing]);
+        if (!editing) {
+            setName(item.name); setAmount(item.amount); setTag(item.tag);
+            setDateStr(typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now()));
+        }
+    }, [item.name, item.amount, item.tag, item.createdAtMillis, editing]);
 
     const handleSave = useCallback(async () => {
         if (!name.trim() || Number(amount) <= 0) return;
-        await onSave(item.id, {name:name.trim(), amount:Number(amount), tag});
+        const newMs = dateStr ? fromLocalDateStr(dateStr, item.createdAtMillis) : item.createdAtMillis;
+        await onSave(item.id, {name:name.trim(), amount:Number(amount), tag, createdAtMillis:newMs});
         setEditing(false);
-    }, [item.id, name, amount, tag, onSave]);
+    }, [item.id, item.createdAtMillis, name, amount, tag, dateStr, onSave]);
 
     if (editing) return (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
@@ -541,6 +558,13 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
                     className="w-full p-4 bg-white rounded-2xl border border-indigo-200 outline-none font-black tabular-nums"
                     style={{fontSize:'var(--fs-xl)'}}
                     value={amount} onChange={e=>setAmount(e.target.value)}/>
+                <div className="flex items-center gap-3 bg-white rounded-2xl border border-indigo-200 px-4 py-3">
+                    <Icon name="calendar" size={15} className="text-slate-400 shrink-0"/>
+                    <input type="date"
+                        className="flex-1 outline-none text-body text-slate-700 bg-transparent"
+                        value={dateStr}
+                        onChange={e=>setDateStr(e.target.value)}/>
+                </div>
                 <div className="flex flex-wrap gap-2">
                     {tags.map(t => { const tc=tagColor(t); return (
                         <button type="button" key={t} onClick={()=>setTag(t)}
