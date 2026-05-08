@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="家計簿">
+    <meta name="theme-color" content="#4338ca">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.svg">
     <title>残高管理アプリ</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -13,6 +17,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lucide-static@0.321.0/font/lucide.min.css">
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <style>
         :root {
             --fs-xs: 11px;
@@ -89,11 +94,12 @@ const firebaseConfig = {
     appId: "1:686700068143:web:ab642169bf42364e8f35da",
 };
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+const db   = firebase.firestore();
+const auth = firebase.auth();
 const { FieldValue } = firebase.firestore;
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const APP_VERSION  = '3.1.0';
+const APP_VERSION  = '3.2.0';
 const DEFAULT_TAGS = ['食費','日用品','交通費','娯楽'];
 
 const PALETTES = [
@@ -249,6 +255,29 @@ const AddTagModal = ({tags, onAdd, onClose}) => {
     );
 };
 
+// ─── useGlobalSettings hook ───────────────────────────────────────────────────
+// カテゴリ（tags）を月をまたいでグローバルに管理する。
+const useGlobalSettings = () => {
+    const [tags, setTags] = useState(DEFAULT_TAGS);
+    const settingsRef = useMemo(() => db.collection('settings').doc('global'), []);
+
+    useEffect(() => {
+        return settingsRef.onSnapshot(doc => {
+            if (doc.exists && Array.isArray(doc.data().tags)) {
+                setTags(doc.data().tags);
+            } else {
+                settingsRef.set({tags: DEFAULT_TAGS}, {merge: true});
+            }
+        });
+    }, [settingsRef]);
+
+    const updateTags = useCallback((newTags) => {
+        settingsRef.set({tags: newTags}, {merge: true});
+    }, [settingsRef]);
+
+    return {tags, updateTags};
+};
+
 // ─── useMonthData hook ────────────────────────────────────────────────────────
 // Firestore から月別データをリアルタイム購読するカスタムフック。
 // isLoading: 初回データ取得中フラグ（スケルトン表示に利用）
@@ -256,7 +285,6 @@ const useMonthData = (currentMonth) => {
     const [budget,     setBudget]     = useState(0);
     const [tagBudgets, setTagBudgets] = useState({});
     const [expenses,   setExpenses]   = useState([]);
-    const [tags,       setTags]       = useState(DEFAULT_TAGS);
     const [isOnline,   setIsOnline]   = useState(navigator.onLine);
     const [isLoading,  setIsLoading]  = useState(true);
 
@@ -288,7 +316,6 @@ const useMonthData = (currentMonth) => {
                 const d = doc.data() || {};
                 setBudget(Number(d.budget||0));
                 setTagBudgets(d.tagBudgets||{});
-                if (d.tags) setTags(d.tags);
                 // 旧形式サブコレクション移行
                 if (Array.isArray(d.expenses) && d.expenses.length > 0 && !d.migratedToSubcollection) {
                     try {
@@ -308,7 +335,6 @@ const useMonthData = (currentMonth) => {
                 }
             } else {
                 setBudget(0); setTagBudgets({});
-                updateFirebase({tags: DEFAULT_TAGS});
             }
             monthLoaded = true;
             tryFinish();
@@ -326,7 +352,7 @@ const useMonthData = (currentMonth) => {
         return () => { cancelled=true; unsubMonth(); unsubExp(); };
     }, [currentMonth, monthRef, updateFirebase]);
 
-    return {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, isOnline, isLoading};
+    return {budget, tagBudgets, expenses, updateFirebase, monthRef, isOnline, isLoading};
 };
 
 // ─── MonthlySummaryCard ───────────────────────────────────────────────────────
@@ -434,16 +460,29 @@ const MonthlySummaryCard = ({budget, totalSpent, onEditBudget, currentMonth}) =>
 };
 
 // ─── BudgetModal ──────────────────────────────────────────────────────────────
-const BudgetModal = ({current, onSave, onClose}) => {
-    const [val, setVal] = useState(current||'');
-    const handleSave = () => { if (Number(val)>0) { onSave(Number(val)); onClose(); } };
+const BudgetModal = ({current, currentMonth, onSave, onClose}) => {
+    const [val,        setVal]        = useState(current||'');
+    const [lastBudget, setLastBudget] = useState(null);
+
+    useEffect(() => {
+        const [y, m] = currentMonth.split('-').map(Number);
+        const d = new Date(y, m - 2, 1);
+        const prevMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        db.collection('months').doc(prevMonth).get()
+            .then(doc => {
+                if (doc.exists && Number(doc.data().budget) > 0) setLastBudget(Number(doc.data().budget));
+            }).catch(() => {});
+    }, [currentMonth]);
+
+    const handleSave = () => { if (Number(val) > 0) { onSave(Number(val)); onClose(); } };
+
     return (
         <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-500 anim-slide relative z-20">
             <div className="flex justify-between items-center mb-6">
                 <h3 className="font-black text-slate-800 text-label">今月の予算を設定</h3>
                 <button onClick={onClose} className="text-slate-300"><Icon name="x" size={20}/></button>
             </div>
-            <div className="relative mb-8">
+            <div className="relative mb-4">
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
                 <input type="number" inputMode="numeric"
                     className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800"
@@ -453,6 +492,13 @@ const BudgetModal = ({current, onSave, onClose}) => {
                     onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
                     autoFocus/>
             </div>
+            {lastBudget ? (
+                <button onClick={()=>setVal(String(lastBudget))}
+                    className="w-full mb-6 flex items-center justify-center gap-2 py-2.5 rounded-2xl border-2 border-dashed border-slate-200 text-caption text-slate-400 hover:border-indigo-300 hover:text-indigo-500 transition-all active:scale-95">
+                    <Icon name="copy" size={13}/>
+                    先月と同じ（¥{fmt(lastBudget)}）
+                </button>
+            ) : <div className="mb-6"/>}
             <button onClick={handleSave} disabled={!(Number(val)>0)}
                 className={`w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all ${Number(val)>0?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
                 この金額で確定する
@@ -711,7 +757,7 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
                 )}
 
                 {showBudget && (
-                    <BudgetModal current={budget} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
+                    <BudgetModal current={budget} currentMonth={currentMonth} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
                 )}
 
                 <ExpenseForm tags={tags} onAdd={handleAdd}/>
@@ -813,7 +859,7 @@ const TagBudgetModal = ({tag, current, onSave, onClose}) => {
 // ─── ReportView ───────────────────────────────────────────────────────────────
 // レポート画面。月次概要・カテゴリ別割合・予算管理・支出詳細モーダル。
 // カテゴリは支出額の多い順に表示する。
-const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFirebase}) => {
+const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFirebase, updateTags}) => {
     const [selectedTag,      setSelectedTag]      = useState(null);
     const [isAddingTag,      setIsAddingTag]       = useState(false);
     const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
@@ -1054,7 +1100,7 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
                 </Portal>
             )}
 
-            {isAddingTag && <Portal><AddTagModal tags={tags} onAdd={name=>updateFirebase({tags:[...tags,name]})} onClose={()=>setIsAddingTag(false)}/></Portal>}
+            {isAddingTag && <Portal><AddTagModal tags={tags} onAdd={name=>updateTags([...tags,name])} onClose={()=>setIsAddingTag(false)}/></Portal>}
             {editingBudgetTag && (
                 <Portal>
                     <TagBudgetModal
@@ -1070,7 +1116,7 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
 // 設定画面。カテゴリ管理（予算額も表示）・CSVエクスポート・アプリ情報。
-const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, showToast}) => {
+const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, updateTags, showToast}) => {
     const [confirmDelete, setConfirmDelete] = useState(null);
     const [isAddingTag,   setIsAddingTag]   = useState(false);
 
@@ -1078,7 +1124,8 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, showT
         const updated    = tags.filter(t=>t!==tag);
         const newBudgets = {...tagBudgets};
         delete newBudgets[tag];
-        updateFirebase({tags:updated, tagBudgets:newBudgets});
+        updateTags(updated);
+        updateFirebase({tagBudgets:newBudgets});
         setConfirmDelete(null);
         showToast(`「${tag}」を削除しました`, 'info');
     }, [tags, tagBudgets, updateFirebase, showToast]);
@@ -1181,7 +1228,7 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, showT
 
             {isAddingTag && (
                 <Portal><AddTagModal tags={tags}
-                    onAdd={name=>{ updateFirebase({tags:[...tags,name]}); showToast(`「${name}」を追加しました`,'success'); }}
+                    onAdd={name=>{ updateTags([...tags,name]); showToast(`「${name}」を追加しました`,'success'); }}
                     onClose={()=>setIsAddingTag(false)}/></Portal>
             )}
             {confirmDelete && (
@@ -1279,10 +1326,19 @@ const App = () => {
     const [view,         setView]         = useState('home');
     const [currentMonth, setCurrentMonth] = useState(() => monthStr());
     const [toast,        setToast]        = useState(null);
+    const [authReady,    setAuthReady]    = useState(false);
     const toastTimer  = useRef(null);
     const scrollRef   = useRef(null);
 
-    const {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
+    // 匿名認証：未認証ユーザーからのアクセスをブロック
+    useEffect(() => {
+        auth.signInAnonymously()
+            .then(() => setAuthReady(true))
+            .catch(() => setAuthReady(true)); // オフライン時も表示継続
+    }, []);
+
+    const {budget, tagBudgets, expenses, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
+    const {tags, updateTags} = useGlobalSettings();
 
     const showToast = useCallback((message, type='success') => {
         if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1307,7 +1363,9 @@ const App = () => {
 
     const goToCurrentMonth = useCallback(() => setCurrentMonth(monthStr()), []);
 
-    const commonProps = {budget, tagBudgets, expenses, tags, updateFirebase, monthRef, showToast, currentMonth};
+    const commonProps = {budget, tagBudgets, expenses, tags, updateFirebase, updateTags, monthRef, showToast, currentMonth};
+
+    if (!authReady) return <LoadingView/>;
 
     return (
         <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl flex flex-col relative overflow-x-hidden">
@@ -1342,6 +1400,13 @@ const App = () => {
 };
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
