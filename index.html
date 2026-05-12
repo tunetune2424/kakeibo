@@ -152,7 +152,7 @@ const fmtRelativeDate = (item) => {
     const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
     if (toDay(itemDate) === toDay(yesterday)) return `昨日 ${timeStr}`;
     const diffDays = Math.floor((Date.now() - ms) / 86400000);
-    if (diffDays < 7) return `${diffDays}日前`;
+    if (diffDays > 0 && diffDays < 7) return `${diffDays}日前`;
     return itemDate.toLocaleString('ja-JP', {month:'2-digit', day:'2-digit'});
 };
 
@@ -477,51 +477,58 @@ const BudgetModal = ({current, currentMonth, onSave, onClose}) => {
     const handleSave = () => { if (Number(val) > 0) { onSave(Number(val)); onClose(); } };
 
     return (
-        <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-500 anim-slide relative z-20">
-            <div className="flex justify-between items-center mb-6">
-                <h3 className="font-black text-slate-800 text-label">今月の予算を設定</h3>
-                <button onClick={onClose} className="text-slate-300"><Icon name="x" size={20}/></button>
+        <Portal>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
+                <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10"
+                     onClick={e=>e.stopPropagation()}>
+                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"/>
+                    <p className="text-label text-slate-400 text-center mb-1" style={{fontSize:'10px'}}>今月の予算を設定</p>
+                    <div className="relative mb-4">
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
+                        <input type="number" inputMode="numeric"
+                            className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800 text-center"
+                            style={{fontSize:'var(--fs-3xl)'}}
+                            value={val}
+                            onChange={e=>setVal(e.target.value)}
+                            onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
+                            autoFocus/>
+                    </div>
+                    {lastBudget ? (
+                        <button onClick={()=>setVal(String(lastBudget))}
+                            className="w-full mb-6 flex items-center justify-center gap-2 py-2.5 rounded-2xl border-2 border-dashed border-slate-200 text-caption text-slate-400 hover:border-indigo-300 hover:text-indigo-500 transition-all active:scale-95">
+                            <Icon name="copy" size={13}/>
+                            先月と同じ（¥{fmt(lastBudget)}）
+                        </button>
+                    ) : <div className="mb-6"/>}
+                    <div className="flex flex-col gap-3">
+                        <button onClick={handleSave} disabled={!(Number(val)>0)}
+                            className={`w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all ${Number(val)>0?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                            この金額で確定する
+                        </button>
+                        <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption text-center">キャンセル</button>
+                    </div>
+                </div>
             </div>
-            <div className="relative mb-4">
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
-                <input type="number" inputMode="numeric"
-                    className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800"
-                    style={{fontSize:'var(--fs-3xl)'}}
-                    value={val}
-                    onChange={e=>setVal(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
-                    autoFocus/>
-            </div>
-            {lastBudget ? (
-                <button onClick={()=>setVal(String(lastBudget))}
-                    className="w-full mb-6 flex items-center justify-center gap-2 py-2.5 rounded-2xl border-2 border-dashed border-slate-200 text-caption text-slate-400 hover:border-indigo-300 hover:text-indigo-500 transition-all active:scale-95">
-                    <Icon name="copy" size={13}/>
-                    先月と同じ（¥{fmt(lastBudget)}）
-                </button>
-            ) : <div className="mb-6"/>}
-            <button onClick={handleSave} disabled={!(Number(val)>0)}
-                className={`w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all ${Number(val)>0?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
-                この金額で確定する
-            </button>
-        </div>
+        </Portal>
     );
 };
 
 // ─── ExpenseForm ──────────────────────────────────────────────────────────────
 const ExpenseForm = ({tags, onAdd}) => {
-    const [name,   setName]   = useState('');
-    const [amount, setAmount] = useState('');
-    const [tag,    setTag]    = useState('');
+    const [name,    setName]    = useState('');
+    const [amount,  setAmount]  = useState('');
+    const [tag,     setTag]     = useState('');
+    const [dateStr, setDateStr] = useState(() => toLocalDateStr(Date.now()));
     const nameRef=useRef(null), amountRef=useRef(null);
     const canSubmit = name.trim().length > 0 && Number(amount) > 0;
 
     const handleSubmit = useCallback(async (e) => {
         e.preventDefault();
         if (!canSubmit) return;
-        await onAdd({name:name.trim(), amount:Number(amount), tag:tag||'未分類'});
-        setName(''); setAmount(''); setTag('');
+        await onAdd({name:name.trim(), amount:Number(amount), tag:tag||'未分類', date:dateStr});
+        setName(''); setAmount(''); setTag(''); setDateStr(toLocalDateStr(Date.now()));
         requestAnimationFrame(() => nameRef.current?.focus());
-    }, [name, amount, tag, canSubmit, onAdd]);
+    }, [name, amount, tag, dateStr, canSubmit, onAdd]);
 
     return (
         <div className="bg-white p-7 rounded-[3rem] shadow-sm border border-slate-100 mb-8 mt-12">
@@ -544,6 +551,13 @@ const ExpenseForm = ({tags, onAdd}) => {
                         style={{fontSize:'var(--fs-2xl)'}}
                         value={amount}
                         onChange={e=>setAmount(e.target.value)}/>
+                </div>
+                <div className="flex items-center gap-3 bg-slate-50 rounded-2xl border-2 border-transparent focus-within:border-indigo-100 focus-within:bg-white transition-all px-4 py-3">
+                    <Icon name="calendar" size={16} className="text-slate-400 shrink-0"/>
+                    <input type="date"
+                        className="flex-1 outline-none text-body bg-transparent text-slate-700"
+                        value={dateStr}
+                        onChange={e=>setDateStr(e.target.value)}/>
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1">
                     {tags.map(t => {
@@ -569,16 +583,18 @@ const ExpenseForm = ({tags, onAdd}) => {
 };
 
 // ─── ExpenseItem ──────────────────────────────────────────────────────────────
-// 支出1件カード。相対日時表示・インライン編集対応。
+// 支出1件カード。相対日時表示・タップで展開してアクション表示・インライン編集対応。
 const ExpenseItem = ({item, tags, onDelete, onSave}) => {
-    const [editing, setEditing] = useState(false);
-    const [name,    setName]    = useState(item.name);
-    const [amount,  setAmount]  = useState(item.amount);
-    const [tag,     setTag]     = useState(item.tag);
-    const [dateStr, setDateStr] = useState(() =>
+    const [editing,  setEditing]  = useState(false);
+    const [expanded, setExpanded] = useState(false);
+    const [name,     setName]     = useState(item.name);
+    const [amount,   setAmount]   = useState(item.amount);
+    const [tag,      setTag]      = useState(item.tag);
+    const [dateStr,  setDateStr]  = useState(() =>
         typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now())
     );
-    const c = tagColor(item.tag);
+    const displayTag = item.tag || '未分類';
+    const c = tagColor(displayTag);
 
     useEffect(() => {
         if (!editing) {
@@ -627,8 +643,8 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
 
     return (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
-            <div className="p-5">
-                <div className="flex justify-between items-center mb-4">
+            <div className="p-5 cursor-pointer select-none" onClick={()=>setExpanded(p=>!p)}>
+                <div className="flex justify-between items-center">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="w-12 h-12 bg-slate-50 rounded-[1.25rem] flex items-center justify-center border border-slate-100 text-indigo-500 shrink-0">
                             <Icon name="receipt" size={20}/>
@@ -636,26 +652,34 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
                         <div className="min-w-0">
                             <p className="font-black text-slate-800 leading-tight truncate" style={{fontSize:'var(--fs-base)'}}>{item.name}</p>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                <span className={`text-caption px-2 py-0.5 rounded-md ${c.bg} ${c.text} shrink-0`}>{item.tag}</span>
+                                <span className={`text-caption px-2 py-0.5 rounded-md ${c.bg} ${c.text} shrink-0`}>{displayTag}</span>
                                 <span className="text-caption text-slate-400">{fmtRelativeDate(item)}</span>
                             </div>
                         </div>
                     </div>
-                    <p className="font-black text-slate-900 tabular-nums ml-3 shrink-0" style={{fontSize:'var(--fs-xl)'}}>
-                        <span className="opacity-30 mr-0.5" style={{fontSize:'60%'}}>¥</span>{fmt(item.amount)}
-                    </p>
+                    <div className="flex items-center gap-2 ml-3 shrink-0">
+                        <p className="font-black text-slate-900 tabular-nums" style={{fontSize:'var(--fs-xl)'}}>
+                            <span className="opacity-30 mr-0.5" style={{fontSize:'60%'}}>¥</span>{fmt(item.amount)}
+                        </p>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                             className={`text-slate-300 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
                 </div>
-                <div className="flex gap-2 border-t border-slate-50 pt-3">
-                    <button onClick={()=>setEditing(true)}
+            </div>
+            {expanded && (
+                <div className="flex gap-2 border-t border-slate-50 px-5 pb-4 anim-slide">
+                    <button onClick={e=>{e.stopPropagation(); setExpanded(false); setEditing(true);}}
                         className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-500 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 py-2.5 rounded-xl transition-all">
                         <Icon name="edit-3" size={13}/> 編集
                     </button>
-                    <button onClick={()=>onDelete(item.id, item.name)}
+                    <button onClick={e=>{e.stopPropagation(); onDelete(item.id, item.name);}}
                         className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 py-2.5 rounded-xl transition-all">
                         <Icon name="trash-2" size={13}/> 削除
                     </button>
                 </div>
-            </div>
+            )}
         </div>
     );
 };
@@ -663,10 +687,11 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
 // ─── HomeView ─────────────────────────────────────────────────────────────────
 // ホーム画面。別月表示バナー・カテゴリフィルター・支出履歴リスト。
 const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
-    const [showBudget, setShowBudget] = useState(false);
-    const [undoToast,  setUndoToast]  = useState(null);
-    const [confirmDel, setConfirmDel] = useState(null);
-    const [filterTag,  setFilterTag]  = useState(null);
+    const [showBudget,  setShowBudget]  = useState(false);
+    const [undoToast,   setUndoToast]   = useState(null);
+    const [confirmDel,  setConfirmDel]  = useState(null);
+    const [filterTag,   setFilterTag]   = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
     const undoTimer = useRef(null);
 
     const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
@@ -674,24 +699,32 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
     // 別月表示中かどうか
     const isCurrentMonth = currentMonth === monthStr();
 
-    // カテゴリフィルター適用
-    const filteredExpenses = useMemo(() =>
-        filterTag ? expenses.filter(e=>e.tag===filterTag) : expenses,
-    [expenses, filterTag]);
+    // カテゴリ・検索フィルター適用（createdAtMillis降順でソート）
+    const filteredExpenses = useMemo(() => {
+        let list = filterTag ? expenses.filter(e=>e.tag===filterTag) : expenses;
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            list = list.filter(e => (e.name||'').toLowerCase().includes(q));
+        }
+        return [...list].sort((a,b) => (b.createdAtMillis||0) - (a.createdAtMillis||0));
+    }, [expenses, filterTag, searchQuery]);
 
     // フィルター用カテゴリ（使用中のもののみ）
     const usedTags = useMemo(() =>
         [...new Set(expenses.map(e=>e.tag))],
     [expenses]);
 
-    const handleAdd = useCallback(async ({name, amount, tag}) => {
+    const handleAdd = useCallback(async ({name, amount, tag, date}) => {
         try {
-            await monthRef.collection('expenses').doc().set({
-                name, amount, tag, createdAtMillis:nowMs(), createdAt:FieldValue.serverTimestamp()
+            const createdAtMillis = date ? fromLocalDateStr(date, Date.now()) : nowMs();
+            const targetMonth = monthStr(new Date(createdAtMillis));
+            const targetRef = targetMonth === currentMonth ? monthRef : db.collection('months').doc(targetMonth);
+            await targetRef.collection('expenses').doc().set({
+                name, amount, tag, createdAtMillis, createdAt:FieldValue.serverTimestamp()
             });
             showToast('記録を保存しました', 'success');
         } catch(e) { showToast('保存に失敗しました', 'error'); }
-    }, [monthRef, showToast]);
+    }, [monthRef, currentMonth, showToast]);
 
     const handleDeleteConfirmed = useCallback(async () => {
         if (!confirmDel) return;
@@ -762,13 +795,28 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
 
                 <ExpenseForm tags={tags} onAdd={handleAdd}/>
 
-                {/* 履歴ヘッダー + フィルター */}
+                {/* 履歴ヘッダー + 検索 + フィルター */}
                 <div className="mb-4 space-y-3">
                     <div className="flex justify-between items-center px-2">
                         <h2 className="text-label text-slate-400">最近の履歴</h2>
                         <span className="text-caption text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">
-                            {filterTag ? `${filteredExpenses.length}/${expenses.length}件` : `${expenses.length}件`}
+                            {(filterTag || searchQuery) ? `${filteredExpenses.length}/${expenses.length}件` : `${expenses.length}件`}
                         </span>
+                    </div>
+
+                    {/* 検索バー */}
+                    <div className="relative">
+                        <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
+                        <input type="text" placeholder="品目名で検索..."
+                            className="w-full p-3 pl-11 pr-10 bg-white rounded-2xl border border-slate-100 outline-none text-body focus:border-indigo-200 focus:shadow-sm transition-all"
+                            value={searchQuery}
+                            onChange={e=>setSearchQuery(e.target.value)}/>
+                        {searchQuery && (
+                            <button onClick={()=>setSearchQuery('')}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 active:scale-90 transition-all">
+                                <Icon name="x" size={14}/>
+                            </button>
+                        )}
                     </div>
 
                     {/* カテゴリフィルターチップ */}
@@ -793,9 +841,16 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
 
                 <div className="space-y-4 content-pb">
                     {filteredExpenses.length === 0 ? (
-                        <div className="text-center py-16 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
-                            <Icon name={filterTag?'filter':'database'} className="mx-auto text-slate-200 mb-3" size={32}/>
-                            <p className="text-label text-slate-400">{filterTag ? `「${filterTag}」の支出はありません` : 'No Records'}</p>
+                        <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200 anim-fade">
+                            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-5">
+                                <Icon name={searchQuery?'search':filterTag?'filter':'inbox'} className="text-slate-300" size={40}/>
+                            </div>
+                            <p className="font-black text-slate-500 mb-2" style={{fontSize:'var(--fs-base)'}}>
+                                {searchQuery ? `「${searchQuery}」は見つかりません` : filterTag ? `「${filterTag}」の支出はありません` : 'まだ支出が記録されていません'}
+                            </p>
+                            {!filterTag && !searchQuery && (
+                                <p className="text-caption text-slate-300 px-8">上のフォームから支出を追加しましょう</p>
+                            )}
                         </div>
                     ) : filteredExpenses.map(item => (
                         <ExpenseItem key={item.id} item={item} tags={tags}
@@ -856,6 +911,63 @@ const TagBudgetModal = ({tag, current, onSave, onClose}) => {
     );
 };
 
+// ─── MonthlyTrendChart ───────────────────────────────────────────────────────
+const MonthlyTrendChart = ({data, currentMonth}) => {
+    if (!data || data.length === 0 || data.every(d => d.total === 0)) return null;
+    const maxVal = Math.max(...data.map(d => d.total), 1);
+    const chartH = 100, barW = 36, gap = 10, pad = 4;
+
+    const fmtLabel = (v) =>
+        v >= 100000 ? `${Math.round(v/10000)}万` :
+        v >= 10000  ? `${Math.round(v/1000)}k`   :
+        v >= 1000   ? `${Math.round(v/1000)}k`   : `${v}`;
+
+    return (
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm mb-6">
+            <p className="text-label text-slate-400 mb-5 flex items-center gap-2">
+                <span className="w-2 h-2 bg-violet-500 rounded-full"/> 月別支出推移
+            </p>
+            <div className="overflow-x-auto hide-scroll">
+                <svg width={data.length*(barW+gap)-gap+pad*2} height={chartH+44}
+                     style={{display:'block', overflow:'visible', margin:'0 auto'}}>
+                    {data.map((d,i) => {
+                        const barH = d.total > 0 ? Math.max((d.total/maxVal)*chartH, 4) : 0;
+                        const x = pad + i*(barW+gap);
+                        const y = chartH - barH;
+                        const isCurrent = d.month === currentMonth;
+                        const [,mo] = d.month.split('-');
+                        return (
+                            <g key={d.month}>
+                                <rect x={x} y={0} width={barW} height={chartH} rx="10"
+                                    fill={isCurrent ? '#ede9fe' : '#f8fafc'}/>
+                                {d.total > 0 && (
+                                    <rect x={x} y={y} width={barW} height={barH} rx="10"
+                                        fill={isCurrent ? '#7c3aed' : '#c4b5fd'}/>
+                                )}
+                                {d.total > 0 && (
+                                    <text x={x+barW/2} y={y-6} textAnchor="middle"
+                                        fontSize="9" fontWeight="800"
+                                        fill={isCurrent ? '#7c3aed' : '#a78bfa'}>
+                                        {fmtLabel(d.total)}
+                                    </text>
+                                )}
+                                <text x={x+barW/2} y={chartH+18} textAnchor="middle"
+                                    fontSize="10" fontWeight={isCurrent ? '800' : '700'}
+                                    fill={isCurrent ? '#7c3aed' : '#94a3b8'}>
+                                    {parseInt(mo)}月
+                                </text>
+                                {isCurrent && (
+                                    <circle cx={x+barW/2} cy={chartH+30} r="3" fill="#7c3aed"/>
+                                )}
+                            </g>
+                        );
+                    })}
+                </svg>
+            </div>
+        </div>
+    );
+};
+
 // ─── ReportView ───────────────────────────────────────────────────────────────
 // レポート画面。月次概要・カテゴリ別割合・予算管理・支出詳細モーダル。
 // カテゴリは支出額の多い順に表示する。
@@ -863,6 +975,7 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
     const [selectedTag,      setSelectedTag]      = useState(null);
     const [isAddingTag,      setIsAddingTag]       = useState(false);
     const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
+    const [trendData,        setTrendData]         = useState([]);
 
     const tagStats = useMemo(() => {
         const s = {};
@@ -898,6 +1011,29 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
     const selectedTotal = useMemo(() =>
         selectedExpenses.reduce((s,e)=>s+e.amount, 0),
     [selectedExpenses]);
+
+    // 過去5ヶ月分をFirestoreから取得（currentMonth変更時のみ）
+    useEffect(() => {
+        let cancelled = false;
+        const [y, m] = currentMonth.split('-').map(Number);
+        const pastMonths = Array.from({length:5}, (_, i) => {
+            const d = new Date(y, m - 1 - 5 + i, 1);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        });
+        Promise.all(pastMonths.map(async mo => {
+            const snap = await db.collection('months').doc(mo).collection('expenses').get();
+            return {month:mo, total: snap.docs.reduce((s,d)=>s+Number(d.data().amount||0), 0)};
+        })).then(past => {
+            if (!cancelled) setTrendData(past);
+        }).catch(()=>{});
+        return () => { cancelled = true; };
+    }, [currentMonth]);
+
+    // 現在月はリアルタイムデータ（expenses）で上書き
+    const chartData = useMemo(() => [
+        ...trendData,
+        {month: currentMonth, total: expenses.reduce((s,e)=>s+Number(e.amount||0), 0)},
+    ], [trendData, currentMonth, expenses]);
 
     return (
         <div className="anim-slide px-6 pt-8 content-pb">
@@ -954,6 +1090,8 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
                     </>
                 )}
             </div>
+
+            <MonthlyTrendChart data={chartData} currentMonth={currentMonth}/>
 
             {/* カテゴリ別予算 */}
             <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm mb-6">
@@ -1266,8 +1404,10 @@ const MonthHeader = ({currentMonth, onChangeMonth, onSetMonth, isOnline}) => {
             {!isOnline && <div className="offline-banner">⚠ オフライン — データは同期されません</div>}
             <div className="glass-nav text-white px-2 py-6 flex flex-col gap-4 shadow-xl sticky top-0 z-[60] rounded-b-[2rem]">
                 <div className="flex justify-between items-center px-6">
-                    <button onClick={()=>onChangeMonth(-1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10">
-                        <Icon name="chevron-left" size={32}/>
+                    <button onClick={()=>onChangeMonth(-1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10 text-white">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="15 18 9 12 15 6"/>
+                        </svg>
                     </button>
                     <div className="flex flex-col items-center cursor-pointer" onClick={()=>setPickerOpen(p=>!p)}>
                         <p className="text-label text-indigo-200 mb-1" style={{fontSize:'10px'}}>{year}</p>
@@ -1286,8 +1426,10 @@ const MonthHeader = ({currentMonth, onChangeMonth, onSetMonth, isOnline}) => {
                             </button>
                         )}
                     </div>
-                    <button onClick={()=>onChangeMonth(1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10">
-                        <Icon name="chevron-right" size={32}/>
+                    <button onClick={()=>onChangeMonth(1)} className="w-14 h-14 bg-white/10 hover:bg-white/20 active:scale-90 rounded-2xl flex items-center justify-center transition-all border border-white/10 text-white">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="9 18 15 12 9 6"/>
+                        </svg>
                     </button>
                 </div>
                 {pickerOpen && (
