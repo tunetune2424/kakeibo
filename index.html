@@ -287,6 +287,7 @@ const useMonthData = (currentMonth) => {
     const [expenses,   setExpenses]   = useState([]);
     const [isOnline,   setIsOnline]   = useState(navigator.onLine);
     const [isLoading,  setIsLoading]  = useState(true);
+    const [incomes,    setIncomes]    = useState([]);
 
     const monthRef = useMemo(() => db.collection('months').doc(currentMonth), [currentMonth]);
 
@@ -307,8 +308,9 @@ const useMonthData = (currentMonth) => {
         setIsLoading(true);
         let cancelled = false;
         let expLoaded = false;
+        let incLoaded = false;
         let monthLoaded = false;
-        const tryFinish = () => { if (expLoaded && monthLoaded) setIsLoading(false); };
+        const tryFinish = () => { if (expLoaded && incLoaded && monthLoaded) setIsLoading(false); };
 
         const unsubMonth = monthRef.onSnapshot(async (doc) => {
             if (cancelled) return;
@@ -349,15 +351,24 @@ const useMonthData = (currentMonth) => {
                 tryFinish();
             });
 
-        return () => { cancelled=true; unsubMonth(); unsubExp(); };
+        const unsubIncome = monthRef.collection('incomes')
+            .orderBy('createdAtMillis','desc')
+            .onSnapshot(snap => {
+                if (cancelled) return;
+                setIncomes(snap.docs.map(d => ({id:d.id, ...d.data()})));
+                incLoaded = true;
+                tryFinish();
+            });
+
+        return () => { cancelled=true; unsubMonth(); unsubExp(); unsubIncome(); };
     }, [currentMonth, monthRef, updateFirebase]);
 
-    return {budget, tagBudgets, expenses, updateFirebase, monthRef, isOnline, isLoading};
+    return {budget, tagBudgets, expenses, incomes, updateFirebase, monthRef, isOnline, isLoading};
 };
 
 // ─── MonthlySummaryCard ───────────────────────────────────────────────────────
 // ホーム上部のサマリーカード。予算未設定時はセットアップ促進CTAを表示。
-const MonthlySummaryCard = ({budget, totalSpent, onEditBudget, currentMonth}) => {
+const MonthlySummaryCard = ({budget, totalSpent, totalIncome, onEditBudget, currentMonth}) => {
     const balance = budget - totalSpent;
     const pct     = budget > 0 ? Math.min(100, (totalSpent/budget)*100) : 0;
     const isOver  = balance < 0;
@@ -452,6 +463,28 @@ const MonthlySummaryCard = ({budget, totalSpent, onEditBudget, currentMonth}) =>
                         <div className="mt-2 w-full bg-black/20 h-1.5 rounded-full overflow-hidden">
                             <div className="h-full rounded-full bar-anim" style={{width:`${pct}%`, backgroundColor:barColor}}/>
                         </div>
+                    )}
+                </div>
+                <div className="bg-white/10 p-4 rounded-[1.75rem] border border-white/10 text-left">
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <Icon name="trending-up" size={11} className="opacity-60"/>
+                        <p className="text-label opacity-60" style={{fontSize:'9px'}}>収入計</p>
+                    </div>
+                    <p className="font-black tabular-nums text-emerald-300" style={{fontSize:'var(--fs-xl)'}}>
+                        {totalIncome > 0 ? `¥${fmt(totalIncome)}` : '—'}
+                    </p>
+                </div>
+                <div className="bg-white/10 p-4 rounded-[1.75rem] border border-white/10 text-left">
+                    <div className="flex items-center gap-1.5 mb-2">
+                        <Icon name="wallet" size={11} className="opacity-60"/>
+                        <p className="text-label opacity-60" style={{fontSize:'9px'}}>収支</p>
+                    </div>
+                    {totalIncome > 0 ? (
+                        <p className={`font-black tabular-nums ${(totalIncome - totalSpent) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`} style={{fontSize:'var(--fs-xl)'}}>
+                            {(totalIncome - totalSpent) < 0 ? '-' : ''}¥{fmt(Math.abs(totalIncome - totalSpent))}
+                        </p>
+                    ) : (
+                        <p className="text-label opacity-30" style={{fontSize:'var(--fs-sm)'}}>収入未記録</p>
                     )}
                 </div>
             </div>
@@ -582,6 +615,152 @@ const ExpenseForm = ({tags, onAdd}) => {
     );
 };
 
+// ─── IncomeForm ───────────────────────────────────────────────────────────────
+const IncomeForm = ({onAdd}) => {
+    const [name,    setName]    = useState('');
+    const [amount,  setAmount]  = useState('');
+    const [dateStr, setDateStr] = useState(() => toLocalDateStr(Date.now()));
+    const nameRef=useRef(null), amountRef=useRef(null);
+    const canSubmit = name.trim().length > 0 && Number(amount) > 0;
+
+    const handleSubmit = useCallback(async (e) => {
+        e.preventDefault();
+        if (!canSubmit) return;
+        await onAdd({name:name.trim(), amount:Number(amount), date:dateStr});
+        setName(''); setAmount(''); setDateStr(toLocalDateStr(Date.now()));
+        requestAnimationFrame(() => nameRef.current?.focus());
+    }, [name, amount, dateStr, canSubmit, onAdd]);
+
+    return (
+        <div className="bg-white p-7 rounded-[3rem] shadow-sm border border-slate-100 mb-8 mt-4">
+            <h2 className="text-label text-slate-400 mb-5 flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full"/> 収入を記録
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="relative">
+                    <Icon name="edit-3" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"/>
+                    <input ref={nameRef} type="text" placeholder="収入元（例: 給与）"
+                        className="w-full p-4 pl-11 bg-slate-50 rounded-2xl outline-none text-body border-2 border-transparent focus:border-emerald-100 focus:bg-white transition-all"
+                        value={name}
+                        onChange={e=>setName(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); amountRef.current?.focus(); }}}/>
+                </div>
+                <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-300 text-lg">¥</span>
+                    <input ref={amountRef} type="number" inputMode="numeric" placeholder="金額"
+                        className="w-full p-4 pl-10 bg-slate-50 rounded-2xl outline-none font-black tabular-nums border-2 border-transparent focus:border-emerald-100 focus:bg-white transition-all"
+                        style={{fontSize:'var(--fs-2xl)'}}
+                        value={amount}
+                        onChange={e=>setAmount(e.target.value)}/>
+                </div>
+                <div className="flex items-center gap-3 bg-slate-50 rounded-2xl border-2 border-transparent focus-within:border-emerald-100 focus-within:bg-white transition-all px-4 py-3">
+                    <Icon name="calendar" size={16} className="text-slate-400 shrink-0"/>
+                    <input type="date"
+                        className="flex-1 outline-none text-body bg-transparent text-slate-700"
+                        value={dateStr}
+                        onChange={e=>setDateStr(e.target.value)}/>
+                </div>
+                <button type="submit" disabled={!canSubmit}
+                    className={`w-full py-5 rounded-3xl font-black shadow-xl transition-all flex items-center justify-center gap-3 ${canSubmit?'bg-emerald-600 text-white active:scale-[0.97]':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                    <Icon name="plus-circle" size={20}/> 収入を保存
+                </button>
+            </form>
+        </div>
+    );
+};
+
+// ─── IncomeItem ───────────────────────────────────────────────────────────────
+const IncomeItem = ({item, onDelete, onSave}) => {
+    const [editing,  setEditing]  = useState(false);
+    const [expanded, setExpanded] = useState(false);
+    const [name,     setName]     = useState(item.name);
+    const [amount,   setAmount]   = useState(item.amount);
+    const [dateStr,  setDateStr]  = useState(() =>
+        typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now())
+    );
+
+    useEffect(() => {
+        if (!editing) {
+            setName(item.name); setAmount(item.amount);
+            setDateStr(typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now()));
+        }
+    }, [item.name, item.amount, item.createdAtMillis, editing]);
+
+    const handleSave = useCallback(async () => {
+        if (!name.trim() || Number(amount) <= 0) return;
+        const newMs = dateStr ? fromLocalDateStr(dateStr, item.createdAtMillis) : item.createdAtMillis;
+        await onSave(item.id, {name:name.trim(), amount:Number(amount), createdAtMillis:newMs});
+        setEditing(false);
+    }, [item.id, item.createdAtMillis, name, amount, dateStr, onSave]);
+
+    if (editing) return (
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-6 bg-emerald-50/50 space-y-4 anim-slide">
+                <input type="text"
+                    className="w-full p-4 bg-white rounded-2xl border border-emerald-200 outline-none text-body"
+                    value={name} onChange={e=>setName(e.target.value)}/>
+                <input type="number" inputMode="numeric"
+                    className="w-full p-4 bg-white rounded-2xl border border-emerald-200 outline-none font-black tabular-nums"
+                    style={{fontSize:'var(--fs-xl)'}}
+                    value={amount} onChange={e=>setAmount(e.target.value)}/>
+                <div className="flex items-center gap-3 bg-white rounded-2xl border border-emerald-200 px-4 py-3">
+                    <Icon name="calendar" size={15} className="text-slate-400 shrink-0"/>
+                    <input type="date"
+                        className="flex-1 outline-none text-body text-slate-700 bg-transparent"
+                        value={dateStr}
+                        onChange={e=>setDateStr(e.target.value)}/>
+                </div>
+                <div className="flex gap-3">
+                    <button onClick={handleSave} className="flex-[2] bg-emerald-600 text-white py-4 rounded-2xl font-black shadow-md active:scale-95 transition-all">保存</button>
+                    <button onClick={()=>setEditing(false)} className="flex-1 bg-white text-slate-400 py-4 rounded-2xl font-black border border-slate-200 active:scale-95 transition-all">取消</button>
+                </div>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="bg-white rounded-[2.5rem] border border-emerald-100 shadow-sm overflow-hidden hover:shadow-md transition-all">
+            <div className="p-5 cursor-pointer select-none" onClick={()=>setExpanded(p=>!p)}>
+                <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-12 h-12 bg-emerald-50 rounded-[1.25rem] flex items-center justify-center border border-emerald-100 text-emerald-500 shrink-0">
+                            <Icon name="trending-up" size={20}/>
+                        </div>
+                        <div className="min-w-0">
+                            <p className="font-black text-slate-800 leading-tight truncate" style={{fontSize:'var(--fs-base)'}}>{item.name}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="text-caption px-2 py-0.5 rounded-md bg-emerald-500 text-white shrink-0">収入</span>
+                                <span className="text-caption text-slate-400">{fmtRelativeDate(item)}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 ml-3 shrink-0">
+                        <p className="font-black text-emerald-600 tabular-nums" style={{fontSize:'var(--fs-xl)'}}>
+                            <span className="opacity-50 mr-0.5" style={{fontSize:'60%'}}>+¥</span>{fmt(item.amount)}
+                        </p>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                             className={`text-slate-300 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            {expanded && (
+                <div className="flex gap-2 border-t border-slate-50 px-5 pb-4 anim-slide">
+                    <button onClick={e=>{e.stopPropagation(); setExpanded(false); setEditing(true);}}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-500 hover:text-emerald-600 bg-slate-50 hover:bg-emerald-50 py-2.5 rounded-xl transition-all">
+                        <Icon name="edit-3" size={13}/> 編集
+                    </button>
+                    <button onClick={e=>{e.stopPropagation(); onDelete(item.id, item.name);}}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-caption text-slate-400 hover:text-rose-500 bg-slate-50 hover:bg-rose-50 py-2.5 rounded-xl transition-all">
+                        <Icon name="trash-2" size={13}/> 削除
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // ─── ExpenseItem ──────────────────────────────────────────────────────────────
 // 支出1件カード。相対日時表示・タップで展開してアクション表示・インライン編集対応。
 const ExpenseItem = ({item, tags, onDelete, onSave}) => {
@@ -686,15 +865,18 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
 
 // ─── HomeView ─────────────────────────────────────────────────────────────────
 // ホーム画面。別月表示バナー・カテゴリフィルター・支出履歴リスト。
-const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
-    const [showBudget,  setShowBudget]  = useState(false);
-    const [undoToast,   setUndoToast]   = useState(null);
-    const [confirmDel,  setConfirmDel]  = useState(null);
-    const [filterTag,   setFilterTag]   = useState(null);
-    const [searchQuery, setSearchQuery] = useState('');
+const HomeView = ({budget, tagBudgets, expenses, incomes, tags, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
+    const [showBudget,       setShowBudget]       = useState(false);
+    const [undoToast,        setUndoToast]        = useState(null);
+    const [confirmDel,       setConfirmDel]       = useState(null);
+    const [confirmDelIncome, setConfirmDelIncome] = useState(null);
+    const [filterTag,        setFilterTag]        = useState(null);
+    const [searchQuery,      setSearchQuery]      = useState('');
+    const [recordType,       setRecordType]       = useState('expense');
     const undoTimer = useRef(null);
 
-    const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalSpent  = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalIncome = useMemo(() => incomes.reduce((s,i)=>s+i.amount, 0),  [incomes]);
 
     // 別月表示中かどうか
     const isCurrentMonth = currentMonth === monthStr();
@@ -725,6 +907,47 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
             showToast('記録を保存しました', 'success');
         } catch(e) { showToast('保存に失敗しました', 'error'); }
     }, [monthRef, currentMonth, showToast]);
+
+    const handleAddIncome = useCallback(async ({name, amount, date}) => {
+        try {
+            const createdAtMillis = date ? fromLocalDateStr(date, Date.now()) : nowMs();
+            const targetMonth = monthStr(new Date(createdAtMillis));
+            const targetRef = targetMonth === currentMonth ? monthRef : db.collection('months').doc(targetMonth);
+            await targetRef.collection('incomes').doc().set({
+                name, amount, createdAtMillis, createdAt:FieldValue.serverTimestamp()
+            });
+            showToast('収入を保存しました', 'success');
+        } catch(e) { showToast('保存に失敗しました', 'error'); }
+    }, [monthRef, currentMonth, showToast]);
+
+    const handleDeleteIncomeConfirmed = useCallback(async () => {
+        if (!confirmDelIncome) return;
+        const {id, name} = confirmDelIncome;
+        setConfirmDelIncome(null);
+        await monthRef.collection('incomes').doc(id).delete();
+        showToast(`「${name}」を削除しました`, 'info');
+    }, [confirmDelIncome, monthRef, showToast]);
+
+    const handleSaveIncome = useCallback(async (id, updates) => {
+        const newMonth = typeof updates.createdAtMillis === 'number'
+            ? monthStr(new Date(updates.createdAtMillis))
+            : currentMonth;
+        if (newMonth !== currentMonth) {
+            const batch = db.batch();
+            batch.delete(monthRef.collection('incomes').doc(id));
+            batch.set(
+                db.collection('months').doc(newMonth).collection('incomes').doc(id),
+                {...updates, updatedAt:FieldValue.serverTimestamp()}
+            );
+            await batch.commit();
+            showToast(`${newMonth} に移動しました`, 'info');
+        } else {
+            await monthRef.collection('incomes').doc(id).set(
+                {...updates, updatedAt:FieldValue.serverTimestamp()}, {merge:true}
+            );
+            showToast('更新しました', 'success');
+        }
+    }, [monthRef, showToast, currentMonth]);
 
     const handleDeleteConfirmed = useCallback(async () => {
         if (!confirmDel) return;
@@ -774,7 +997,7 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
 
     return (
         <div className="anim-slide">
-            <MonthlySummaryCard budget={budget} totalSpent={totalSpent} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
+            <MonthlySummaryCard budget={budget} totalSpent={totalSpent} totalIncome={totalIncome} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
 
             <div className="px-6">
                 {/* 別月閲覧バナー */}
@@ -793,75 +1016,142 @@ const HomeView = ({budget, tagBudgets, expenses, tags, updateFirebase, monthRef,
                     <BudgetModal current={budget} currentMonth={currentMonth} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
                 )}
 
-                <ExpenseForm tags={tags} onAdd={handleAdd}/>
+                {/* 支出 / 収入 タブ切替 */}
+                <div className="flex gap-1.5 mt-6 bg-slate-100 p-1.5 rounded-2xl">
+                    <button onClick={()=>{ setRecordType('expense'); setFilterTag(null); setSearchQuery(''); }}
+                        className={`flex-1 py-3 rounded-xl font-black text-caption transition-all flex items-center justify-center gap-1.5 ${recordType==='expense'?'bg-white text-slate-900 shadow-sm':'text-slate-400'}`}>
+                        <Icon name="trending-down" size={13}/> 支出
+                    </button>
+                    <button onClick={()=>{ setRecordType('income'); setFilterTag(null); setSearchQuery(''); }}
+                        className={`flex-1 py-3 rounded-xl font-black text-caption transition-all flex items-center justify-center gap-1.5 ${recordType==='income'?'bg-white text-emerald-600 shadow-sm':'text-slate-400'}`}>
+                        <Icon name="trending-up" size={13}/> 収入
+                    </button>
+                </div>
 
-                {/* 履歴ヘッダー + 検索 + フィルター */}
-                <div className="mb-4 space-y-3">
-                    <div className="flex justify-between items-center px-2">
-                        <h2 className="text-label text-slate-400">最近の履歴</h2>
-                        <span className="text-caption text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">
-                            {(filterTag || searchQuery) ? `${filteredExpenses.length}/${expenses.length}件` : `${expenses.length}件`}
-                        </span>
-                    </div>
+                {recordType === 'expense' ? (
+                    <ExpenseForm tags={tags} onAdd={handleAdd}/>
+                ) : (
+                    <IncomeForm onAdd={handleAddIncome}/>
+                )}
 
-                    {/* 検索バー */}
-                    <div className="relative">
-                        <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
-                        <input type="text" placeholder="品目名で検索..."
-                            className="w-full p-3 pl-11 pr-10 bg-white rounded-2xl border border-slate-100 outline-none text-body focus:border-indigo-200 focus:shadow-sm transition-all"
-                            value={searchQuery}
-                            onChange={e=>setSearchQuery(e.target.value)}/>
-                        {searchQuery && (
-                            <button onClick={()=>setSearchQuery('')}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 active:scale-90 transition-all">
-                                <Icon name="x" size={14}/>
-                            </button>
+                {recordType === 'expense' ? (<>
+                    {/* 履歴ヘッダー + 検索 + フィルター */}
+                    <div className="mb-4 space-y-3">
+                        <div className="flex justify-between items-center px-2">
+                            <h2 className="text-label text-slate-400">支出の履歴</h2>
+                            <span className="text-caption text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">
+                                {(filterTag || searchQuery) ? `${filteredExpenses.length}/${expenses.length}件` : `${expenses.length}件`}
+                            </span>
+                        </div>
+
+                        {/* 検索バー */}
+                        <div className="relative">
+                            <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
+                            <input type="text" placeholder="品目名で検索..."
+                                className="w-full p-3 pl-11 pr-10 bg-white rounded-2xl border border-slate-100 outline-none text-body focus:border-indigo-200 focus:shadow-sm transition-all"
+                                value={searchQuery}
+                                onChange={e=>setSearchQuery(e.target.value)}/>
+                            {searchQuery && (
+                                <button onClick={()=>setSearchQuery('')}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 active:scale-90 transition-all">
+                                    <Icon name="x" size={14}/>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* カテゴリフィルターチップ */}
+                        {usedTags.length > 1 && (
+                            <div className="flex gap-2 overflow-x-auto hide-scroll pb-1">
+                                <button onClick={()=>setFilterTag(null)}
+                                    className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${!filterTag?'bg-slate-900 text-white border-transparent':'bg-white border-slate-100 text-slate-400'}`}>
+                                    すべて
+                                </button>
+                                {usedTags.map(t => {
+                                    const c=tagColor(t), sel=filterTag===t;
+                                    return (
+                                        <button key={t} onClick={()=>setFilterTag(sel?null:t)}
+                                            className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${sel?`${c.bg} ${c.text} border-white/20`:'bg-white border-slate-100 text-slate-400'}`}>
+                                            {t}
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         )}
                     </div>
 
-                    {/* カテゴリフィルターチップ */}
-                    {usedTags.length > 1 && (
-                        <div className="flex gap-2 overflow-x-auto hide-scroll pb-1">
-                            <button onClick={()=>setFilterTag(null)}
-                                className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${!filterTag?'bg-slate-900 text-white border-transparent':'bg-white border-slate-100 text-slate-400'}`}>
-                                すべて
-                            </button>
-                            {usedTags.map(t => {
-                                const c=tagColor(t), sel=filterTag===t;
-                                return (
-                                    <button key={t} onClick={()=>setFilterTag(sel?null:t)}
-                                        className={`shrink-0 px-4 py-2 rounded-xl text-caption transition-all border-2 ${sel?`${c.bg} ${c.text} border-white/20`:'bg-white border-slate-100 text-slate-400'}`}>
-                                        {t}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-
-                <div className="space-y-4 content-pb">
-                    {filteredExpenses.length === 0 ? (
-                        <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200 anim-fade">
-                            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-5">
-                                <Icon name={searchQuery?'search':filterTag?'filter':'inbox'} className="text-slate-300" size={40}/>
+                    <div className="space-y-4 content-pb">
+                        {filteredExpenses.length === 0 ? (
+                            <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200 anim-fade">
+                                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-5">
+                                    <Icon name={searchQuery?'search':filterTag?'filter':'inbox'} className="text-slate-300" size={40}/>
+                                </div>
+                                <p className="font-black text-slate-500 mb-2" style={{fontSize:'var(--fs-base)'}}>
+                                    {searchQuery ? `「${searchQuery}」は見つかりません` : filterTag ? `「${filterTag}」の支出はありません` : 'まだ支出が記録されていません'}
+                                </p>
+                                {!filterTag && !searchQuery && (
+                                    <p className="text-caption text-slate-300 px-8">上のフォームから支出を追加しましょう</p>
+                                )}
                             </div>
-                            <p className="font-black text-slate-500 mb-2" style={{fontSize:'var(--fs-base)'}}>
-                                {searchQuery ? `「${searchQuery}」は見つかりません` : filterTag ? `「${filterTag}」の支出はありません` : 'まだ支出が記録されていません'}
-                            </p>
-                            {!filterTag && !searchQuery && (
-                                <p className="text-caption text-slate-300 px-8">上のフォームから支出を追加しましょう</p>
+                        ) : filteredExpenses.map(item => (
+                            <ExpenseItem key={item.id} item={item} tags={tags}
+                                onDelete={(id,name)=>setConfirmDel({id,name})}
+                                onSave={handleSave}/>
+                        ))}
+                    </div>
+                </>) : (<>
+                    {/* 収入履歴 */}
+                    <div className="mb-4 space-y-3">
+                        <div className="flex justify-between items-center px-2">
+                            <h2 className="text-label text-slate-400">収入の履歴</h2>
+                            <span className="text-caption text-emerald-500 bg-emerald-50 px-2.5 py-1 rounded-full">{incomes.length}件</span>
+                        </div>
+                        <div className="relative">
+                            <Icon name="search" size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"/>
+                            <input type="text" placeholder="収入元で検索..."
+                                className="w-full p-3 pl-11 pr-10 bg-white rounded-2xl border border-slate-100 outline-none text-body focus:border-emerald-200 focus:shadow-sm transition-all"
+                                value={searchQuery}
+                                onChange={e=>setSearchQuery(e.target.value)}/>
+                            {searchQuery && (
+                                <button onClick={()=>setSearchQuery('')}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 active:scale-90 transition-all">
+                                    <Icon name="x" size={14}/>
+                                </button>
                             )}
                         </div>
-                    ) : filteredExpenses.map(item => (
-                        <ExpenseItem key={item.id} item={item} tags={tags}
-                            onDelete={(id,name)=>setConfirmDel({id,name})}
-                            onSave={handleSave}/>
-                    ))}
-                </div>
+                    </div>
+                    <div className="space-y-4 content-pb">
+                        {(() => {
+                            const filtered = searchQuery.trim()
+                                ? incomes.filter(i=>(i.name||'').toLowerCase().includes(searchQuery.trim().toLowerCase()))
+                                : incomes;
+                            if (filtered.length === 0) return (
+                                <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-emerald-100 anim-fade">
+                                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-5">
+                                        <Icon name={searchQuery?'search':'trending-up'} className="text-emerald-200" size={40}/>
+                                    </div>
+                                    <p className="font-black text-slate-500 mb-2" style={{fontSize:'var(--fs-base)'}}>
+                                        {searchQuery ? `「${searchQuery}」は見つかりません` : 'まだ収入が記録されていません'}
+                                    </p>
+                                    {!searchQuery && (
+                                        <p className="text-caption text-slate-300 px-8">上のフォームから収入を追加しましょう</p>
+                                    )}
+                                </div>
+                            );
+                            return filtered.map(item => (
+                                <IncomeItem key={item.id} item={item}
+                                    onDelete={(id,name)=>setConfirmDelIncome({id,name})}
+                                    onSave={handleSaveIncome}/>
+                            ));
+                        })()}
+                    </div>
+                </>)}
             </div>
 
             {confirmDel && (
                 <Portal><ConfirmModal message={`「${confirmDel.name}」を削除します`} onOk={handleDeleteConfirmed} onCancel={()=>setConfirmDel(null)}/></Portal>
+            )}
+            {confirmDelIncome && (
+                <Portal><ConfirmModal message={`「${confirmDelIncome.name}」を削除します`} onOk={handleDeleteIncomeConfirmed} onCancel={()=>setConfirmDelIncome(null)}/></Portal>
             )}
             {undoToast && (
                 <Portal><UndoToast toast={undoToast} onUndo={handleUndo}
@@ -971,7 +1261,7 @@ const MonthlyTrendChart = ({data, currentMonth}) => {
 // ─── ReportView ───────────────────────────────────────────────────────────────
 // レポート画面。月次概要・カテゴリ別割合・予算管理・支出詳細モーダル。
 // カテゴリは支出額の多い順に表示する。
-const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFirebase, updateTags}) => {
+const ReportView = ({currentMonth, budget, tagBudgets, expenses, incomes, tags, updateFirebase, updateTags}) => {
     const [selectedTag,      setSelectedTag]      = useState(null);
     const [isAddingTag,      setIsAddingTag]       = useState(false);
     const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
@@ -987,7 +1277,8 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
         return s;
     }, [expenses, tags, tagBudgets]);
 
-    const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalSpent  = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalIncome = useMemo(() => incomes.reduce((s,i)=>s+i.amount,  0), [incomes]);
 
     // 支出があるカテゴリ（支出額の多い順）
     const activeTags = useMemo(() =>
@@ -1050,7 +1341,7 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
                 <p className="text-label text-slate-400 mb-4 flex items-center gap-2">
                     <span className="w-2 h-2 bg-indigo-500 rounded-full"/> 今月の概要
                 </p>
-                <div className="grid grid-cols-3 gap-3 mb-5">
+                <div className="grid grid-cols-3 gap-3 mb-3">
                     {[
                         {label:'予算',  value:budget,            color:'text-slate-800'},
                         {label:'支出',  value:totalSpent,        color:'text-rose-500'},
@@ -1063,6 +1354,20 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
                             </p>
                         </div>
                     ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                    <div className="bg-emerald-50 rounded-2xl p-3 text-center">
+                        <p className="text-label text-emerald-500 mb-1" style={{fontSize:'9px'}}>収入計</p>
+                        <p className="font-black tabular-nums text-emerald-600" style={{fontSize:'var(--fs-base)'}}>
+                            {totalIncome > 0 ? `¥${fmt(totalIncome)}` : '—'}
+                        </p>
+                    </div>
+                    <div className={`rounded-2xl p-3 text-center ${(totalIncome-totalSpent)>=0?'bg-emerald-50':'bg-rose-50'}`}>
+                        <p className={`text-label mb-1 ${(totalIncome-totalSpent)>=0?'text-emerald-500':'text-rose-400'}`} style={{fontSize:'9px'}}>収支</p>
+                        <p className={`font-black tabular-nums ${(totalIncome-totalSpent)>=0?'text-emerald-600':'text-rose-500'}`} style={{fontSize:'var(--fs-base)'}}>
+                            {totalIncome > 0 ? `${(totalIncome-totalSpent)<0?'-':''}¥${fmt(Math.abs(totalIncome-totalSpent))}` : '—'}
+                        </p>
+                    </div>
                 </div>
                 {/* カテゴリ割合バー */}
                 {totalSpent > 0 && (
@@ -1254,7 +1559,7 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, updateFir
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
 // 設定画面。カテゴリ管理（予算額も表示）・CSVエクスポート・アプリ情報。
-const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, updateTags, showToast}) => {
+const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, updateFirebase, updateTags, showToast}) => {
     const [confirmDelete, setConfirmDelete] = useState(null);
     const [isAddingTag,   setIsAddingTag]   = useState(false);
 
@@ -1269,19 +1574,23 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, updateFirebase, updat
     }, [tags, tagBudgets, updateFirebase, showToast]);
 
     const handleExport = useCallback(() => {
-        const header = '日付,品目,カテゴリ,金額';
-        const rows   = expenses.map(e => {
+        const header  = '日付,種別,品目,カテゴリ,金額';
+        const expRows = expenses.map(e => {
             const d = typeof e.createdAtMillis==='number' ? new Date(e.createdAtMillis).toLocaleDateString('ja-JP') : '';
-            return `${d},"${e.name}","${e.tag}",${e.amount}`;
+            return `${d},支出,"${e.name}","${e.tag||'未分類'}",${e.amount}`;
         });
-        const csv  = [header, ...rows].join('\n');
+        const incRows = incomes.map(i => {
+            const d = typeof i.createdAtMillis==='number' ? new Date(i.createdAtMillis).toLocaleDateString('ja-JP') : '';
+            return `${d},収入,"${i.name}",,${i.amount}`;
+        });
+        const csv  = [header, ...expRows, ...incRows].join('\n');
         const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
         a.href=url; a.download='kakeibo.csv'; a.click();
         URL.revokeObjectURL(url);
         showToast('CSVをダウンロードしました', 'success');
-    }, [expenses, showToast]);
+    }, [expenses, incomes, showToast]);
 
     const totalTagBudget = useMemo(() =>
         Object.values(tagBudgets).reduce((s,v)=>s+Number(v||0), 0),
@@ -1479,7 +1788,7 @@ const App = () => {
             .catch(() => setAuthReady(true)); // オフライン時も表示継続
     }, []);
 
-    const {budget, tagBudgets, expenses, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
+    const {budget, tagBudgets, expenses, incomes, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
     const {tags, updateTags} = useGlobalSettings();
 
     const showToast = useCallback((message, type='success') => {
@@ -1505,7 +1814,7 @@ const App = () => {
 
     const goToCurrentMonth = useCallback(() => setCurrentMonth(monthStr()), []);
 
-    const commonProps = {budget, tagBudgets, expenses, tags, updateFirebase, updateTags, monthRef, showToast, currentMonth};
+    const commonProps = {budget, tagBudgets, expenses, incomes, tags, updateFirebase, updateTags, monthRef, showToast, currentMonth};
 
     if (!authReady) return <LoadingView/>;
 
