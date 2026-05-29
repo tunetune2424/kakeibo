@@ -222,6 +222,56 @@ const LoadingView = () => (
     </div>
 );
 
+// ─── AddFixedTemplateModal ────────────────────────────────────────────────────
+const AddFixedTemplateModal = ({tags, onAdd, onClose}) => {
+    const [name,   setName]   = useState('');
+    const [amount, setAmount] = useState('');
+    const [tag,    setTag]    = useState('');
+    const canSubmit = name.trim() && Number(amount) > 0;
+    const handleAdd = useCallback(() => {
+        if (canSubmit) { onAdd({name:name.trim(), amount:Number(amount), tag:tag||'固定費'}); onClose(); }
+    }, [name, amount, tag, canSubmit, onAdd, onClose]);
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
+            <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10" onClick={e=>e.stopPropagation()}>
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"/>
+                <h3 className="text-label text-slate-400 text-center mb-5" style={{fontSize:'10px'}}>固定費テンプレートを追加</h3>
+                <div className="space-y-4 mb-5">
+                    <input type="text" placeholder="品目（例: 家賃）"
+                        className="w-full p-4 bg-slate-50 rounded-2xl outline-none text-body border-2 border-transparent focus:border-amber-200"
+                        value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+                    <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-300">¥</span>
+                        <input type="number" inputMode="numeric" placeholder="金額"
+                            className="w-full p-4 pl-9 bg-slate-50 rounded-2xl outline-none font-black tabular-nums border-2 border-transparent focus:border-amber-200"
+                            style={{fontSize:'var(--fs-xl)'}}
+                            value={amount} onChange={e=>setAmount(e.target.value)}
+                            onKeyDown={e=>{ if(e.key==='Enter') handleAdd(); }}/>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {tags.map(t => {
+                            const c=tagColor(t), sel=tag===t;
+                            return (
+                                <button type="button" key={t} onClick={()=>setTag(sel?'':t)}
+                                    className={`px-4 py-2 rounded-xl text-caption transition-all border-2 ${sel?`${c.bg} ${c.text} border-white/20`:'bg-white border-slate-100 text-slate-400'}`}>
+                                    {t}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="flex flex-col gap-3">
+                    <button onClick={handleAdd} disabled={!canSubmit}
+                        className={`py-4 rounded-2xl font-black shadow-lg ${canSubmit?'bg-amber-500 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                        追加する
+                    </button>
+                    <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption text-center">キャンセル</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── AddTagModal ──────────────────────────────────────────────────────────────
 const AddTagModal = ({tags, onAdd, onClose}) => {
     const [newTagName, setNewTagName] = useState('');
@@ -256,15 +306,19 @@ const AddTagModal = ({tags, onAdd, onClose}) => {
 };
 
 // ─── useGlobalSettings hook ───────────────────────────────────────────────────
-// カテゴリ（tags）を月をまたいでグローバルに管理する。
+// カテゴリ（tags）と固定費テンプレートを月をまたいでグローバルに管理する。
 const useGlobalSettings = () => {
-    const [tags, setTags] = useState(DEFAULT_TAGS);
+    const [tags,           setTags]           = useState(DEFAULT_TAGS);
+    const [fixedTemplates, setFixedTemplates] = useState([]);
     const settingsRef = useMemo(() => db.collection('settings').doc('global'), []);
 
     useEffect(() => {
         return settingsRef.onSnapshot(doc => {
-            if (doc.exists && Array.isArray(doc.data().tags)) {
-                setTags(doc.data().tags);
+            if (doc.exists) {
+                const data = doc.data();
+                if (Array.isArray(data.tags)) setTags(data.tags);
+                else settingsRef.set({tags: DEFAULT_TAGS}, {merge: true});
+                if (Array.isArray(data.fixedTemplates)) setFixedTemplates(data.fixedTemplates);
             } else {
                 settingsRef.set({tags: DEFAULT_TAGS}, {merge: true});
             }
@@ -275,23 +329,23 @@ const useGlobalSettings = () => {
         settingsRef.set({tags: newTags}, {merge: true});
     }, [settingsRef]);
 
-    return {tags, updateTags};
+    const updateFixedTemplates = useCallback((newTemplates) => {
+        settingsRef.set({fixedTemplates: newTemplates}, {merge: true});
+    }, [settingsRef]);
+
+    return {tags, updateTags, fixedTemplates, updateFixedTemplates};
 };
 
 // ─── useMonthData hook ────────────────────────────────────────────────────────
 // Firestore から月別データをリアルタイム購読するカスタムフック。
 // isLoading: 初回データ取得中フラグ（スケルトン表示に利用）
 const useMonthData = (currentMonth) => {
-    const [budget,        setBudget]        = useState(0);
-    const [tagBudgets,    setTagBudgets]    = useState({});
-    const [expenses,      setExpenses]      = useState([]);
-    const [tags,          setTags]          = useState(DEFAULT_TAGS);
-    const [isOnline,      setIsOnline]      = useState(navigator.onLine);
-    const [isLoading,     setIsLoading]     = useState(true);
-    const [income,        setIncome]        = useState(0);
-    const [savingsGoal,   setSavingsGoal]   = useState(0);
-    const [savingsActual, setSavingsActual] = useState(0);
-    const [fixedTags,     setFixedTags]     = useState([]);
+    const [budget,     setBudget]     = useState(0);
+    const [tagBudgets, setTagBudgets] = useState({});
+    const [expenses,   setExpenses]   = useState([]);
+    const [isOnline,   setIsOnline]   = useState(navigator.onLine);
+    const [isLoading,  setIsLoading]  = useState(true);
+    const [incomes,    setIncomes]    = useState([]);
 
     const monthRef = useMemo(() => db.collection('months').doc(currentMonth), [currentMonth]);
 
@@ -322,11 +376,6 @@ const useMonthData = (currentMonth) => {
                 const d = doc.data() || {};
                 setBudget(Number(d.budget||0));
                 setTagBudgets(d.tagBudgets||{});
-                if (d.tags) setTags(d.tags);
-                setIncome(Number(d.income||0));
-                setSavingsGoal(Number(d.savingsGoal||0));
-                setSavingsActual(Number(d.savingsActual||0));
-                setFixedTags(Array.isArray(d.fixedTags)?d.fixedTags:[]);
                 // 旧形式サブコレクション移行
                 if (Array.isArray(d.expenses) && d.expenses.length > 0 && !d.migratedToSubcollection) {
                     try {
@@ -345,52 +394,65 @@ const useMonthData = (currentMonth) => {
                     } catch(e) { console.error(e); }
                 }
             } else {
-                setBudget(0); setTagBudgets({}); setIncome(0); setSavingsGoal(0); setSavingsActual(0); setFixedTags([]);
-                updateFirebase({tags: DEFAULT_TAGS});
+                setBudget(0); setTagBudgets({});
             }
             monthLoaded = true;
             tryFinish();
+        }, err => {
+            console.error('month fetch error:', err);
+            if (!cancelled) { monthLoaded = true; tryFinish(); }
         });
 
         const unsubExp = monthRef.collection('expenses')
             .orderBy('createdAtMillis','desc')
-            .onSnapshot(snap => {
-                if (cancelled) return;
-                setExpenses(snap.docs.map(d => ({id:d.id, ...d.data()})));
-                expLoaded = true;
-                tryFinish();
-            });
+            .onSnapshot(
+                snap => {
+                    if (cancelled) return;
+                    setExpenses(snap.docs.map(d => ({id:d.id, ...d.data()})));
+                    expLoaded = true;
+                    tryFinish();
+                },
+                err => {
+                    console.error('expenses fetch error:', err);
+                    if (!cancelled) { expLoaded = true; tryFinish(); }
+                }
+            );
 
         const unsubIncome = monthRef.collection('incomes')
             .orderBy('createdAtMillis','desc')
-            .onSnapshot(snap => {
-                if (cancelled) return;
-                setIncomes(snap.docs.map(d => ({id:d.id, ...d.data()})));
-                incLoaded = true;
-                tryFinish();
-            });
+            .onSnapshot(
+                snap => {
+                    if (cancelled) return;
+                    setIncomes(snap.docs.map(d => ({id:d.id, ...d.data()})));
+                    incLoaded = true;
+                    tryFinish();
+                },
+                err => {
+                    console.error('incomes fetch error:', err);
+                    if (!cancelled) { incLoaded = true; tryFinish(); }
+                }
+            );
 
         return () => { cancelled=true; unsubMonth(); unsubExp(); unsubIncome(); };
     }, [currentMonth, monthRef, updateFirebase]);
 
-    return {budget, tagBudgets, expenses, tags, income, savingsGoal, savingsActual, fixedTags, updateFirebase, monthRef, isOnline, isLoading};
+    return {budget, tagBudgets, expenses, incomes, updateFirebase, monthRef, isOnline, isLoading};
 };
 
 // ─── MonthlySummaryCard ───────────────────────────────────────────────────────
-// 収入→固定費→貯金→自由予算の3層フローを表示するサマリーカード
-const MonthlySummaryCard = ({totalSpent, fixedSpent, income, savingsGoal, onEditIncome, onEditSavings, currentMonth}) => {
-    const variableSpent  = totalSpent - fixedSpent;
-    const savingsActual  = income > 0 ? income - totalSpent : 0;   // 収入 - 総支出でリアルタイム計算
-    const freeBudget     = income > 0 ? Math.max(0, income - fixedSpent - savingsGoal) : 0;
-    const freeRemaining  = freeBudget - variableSpent;
-    const overallBalance = income - totalSpent;
-    const freePct        = freeBudget > 0 ? Math.min(100, (variableSpent / freeBudget) * 100) : 0;
-    const isOverFree     = freeRemaining < 0;
-    const isWarnFree     = freePct >= 80 && !isOverFree;
-    const barColor       = isOverFree ? '#f43f5e' : isWarnFree ? '#f59e0b' : '#34d399';
-    const savingsPct     = savingsGoal > 0 ? Math.min(100, Math.round((savingsActual / savingsGoal) * 100)) : null;
+// ホーム上部のサマリーカード。予算未設定時はセットアップ促進CTAを表示。
+// balance = 予算 - 変動費のみ（固定費は予算設定時に引き算済みのため二重引きしない）
+const MonthlySummaryCard = ({budget, totalFixed, totalVariable, totalIncome, onEditBudget, currentMonth}) => {
+    const totalSpent  = totalFixed + totalVariable;
+    const savings     = totalIncome - totalSpent;
+    const balance     = budget - totalVariable;
+    const pct         = budget > 0 ? Math.min(100, (totalVariable/budget)*100) : 0;
+    const isOver      = balance < 0;
+    const isWarn      = pct >= 80 && !isOver;
+    const hasSavings  = totalIncome > 0;
+    const barColor    = isOver ? '#f43f5e' : isWarn ? '#f59e0b' : '#34d399';
 
-    const {remainingDays, dailyFree} = useMemo(() => {
+    const {remainingDays, dailyBudget} = useMemo(() => {
         const today = new Date();
         const [y,m] = currentMonth.split('-').map(Number);
         const lastDay = new Date(y,m,0).getDate();
@@ -399,215 +461,216 @@ const MonthlySummaryCard = ({totalSpent, fixedSpent, income, savingsGoal, onEdit
         if (y===ty && m===tm) rd = lastDay - td + 1;
         else if (y>ty||(y===ty&&m>tm)) rd = lastDay;
         else rd = 0;
-        return {remainingDays:rd, dailyFree:(!isOverFree && rd>0 && freeBudget>0) ? Math.floor(freeRemaining/rd) : null};
-    }, [currentMonth, freeRemaining, isOverFree, freeBudget]);
+        return {remainingDays:rd, dailyBudget:(!isOver&&rd>0) ? Math.floor(balance/rd) : null};
+    }, [currentMonth, balance, isOver]);
+
+    // 大ドーナツ (収入未記録時)
+    const R=52, circ=2*Math.PI*R, offset=circ-(pct/100)*circ;
+    // 小ドーナツ (収入記録済み時)
+    const Rs=38, circS=2*Math.PI*Rs, offsetS=circS-(pct/100)*circS;
 
     return (
         <div className="bg-gradient-to-br from-indigo-700 via-indigo-600 to-blue-500 text-white px-6 pt-6 pb-8 rounded-b-[3.5rem] shadow-xl relative overflow-hidden">
             <div className="absolute -right-8 -top-8 w-48 h-48 bg-white/10 rounded-full blur-3xl pointer-events-none"/>
 
-            {/* 収入未設定バナー */}
-            {income === 0 && (
-                <button onClick={onEditIncome}
+            {/* 予算未設定バナー */}
+            {budget === 0 && (
+                <button onClick={onEditBudget}
                     className="w-full mb-5 flex items-center gap-3 bg-white/15 hover:bg-white/25 border border-white/20 rounded-2xl px-5 py-3.5 transition-all active:scale-[0.98]">
                     <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center shrink-0">
-                        <Icon name="wallet" size={18} className="text-white"/>
+                        <Icon name="target" size={18} className="text-white"/>
                     </div>
                     <div className="text-left flex-1">
-                        <p className="font-black text-white" style={{fontSize:'var(--fs-sm)'}}>今月の収入を設定する</p>
-                        <p className="text-blue-200" style={{fontSize:'var(--fs-xs)'}}>タップして月収を入力</p>
+                        <p className="font-black text-white" style={{fontSize:'var(--fs-sm)'}}>今月の予算を設定する</p>
+                        <p className="text-blue-200" style={{fontSize:'var(--fs-xs)'}}>タップして予算を入力</p>
                     </div>
                     <Icon name="chevron-right" size={18} className="text-white/50"/>
                 </button>
             )}
 
-            {/* 収入 + 全体収支 */}
-            <div className="flex items-start justify-between mb-5">
-                <button onClick={onEditIncome} className="text-left active:opacity-70 transition-opacity">
-                    <p className="text-label text-blue-200 mb-1" style={{fontSize:'10px'}}>今月の収入</p>
-                    <div className="flex items-baseline gap-1">
-                        <span className="opacity-40" style={{fontSize:'14px'}}>¥</span>
-                        <span className="font-black tabular-nums" style={{fontSize:'var(--fs-2xl)'}}>{fmt(income)}</span>
-                        <Icon name="edit-3" size={11} className="opacity-40 ml-1 mb-0.5"/>
-                    </div>
-                </button>
-                {income > 0 && (
-                    <div className="text-right">
-                        <p className="text-label text-blue-200 mb-1" style={{fontSize:'10px'}}>全体収支</p>
-                        <p className={`font-black tabular-nums ${overallBalance >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}
-                           style={{fontSize:'var(--fs-lg)'}}>
-                            {overallBalance >= 0 ? '+' : ''}¥{fmt(overallBalance)}
+            {hasSavings ? (
+                <>
+                    {/* ── 貯金額メイン表示 ── */}
+                    <div className="mb-4">
+                        <p className="text-label text-blue-200 mb-1" style={{fontSize:'10px'}}>今月の貯金額</p>
+                        <p className={`font-black tabular-nums tracking-tighter leading-none mb-4 ${savings >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}
+                           style={{fontSize:'clamp(38px,10vw,54px)'}}>
+                            {savings < 0 ? '−' : '+'}¥{fmt(Math.abs(savings))}
                         </p>
-                    </div>
-                )}
-            </div>
-
-            {/* 3列カード: 固定費 / 貯金 / 自由予算 */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-                <div className="bg-white/10 rounded-[1.5rem] border border-white/10 p-3">
-                    <div className="flex items-center gap-1 mb-1.5">
-                        <Icon name="lock" size={10} className="opacity-50"/>
-                        <p className="text-label opacity-50" style={{fontSize:'8px'}}>固定費</p>
-                    </div>
-                    <p className="font-black tabular-nums text-rose-200" style={{fontSize:'var(--fs-sm)'}}>¥{fmt(fixedSpent)}</p>
-                    <p className="text-label opacity-30 mt-1" style={{fontSize:'8px'}}>支出計 ¥{fmt(totalSpent)}</p>
-                </div>
-
-                <button onClick={onEditSavings} className="bg-white/10 hover:bg-white/20 active:scale-95 rounded-[1.5rem] border border-white/10 p-3 text-left transition-all">
-                    <div className="flex items-center gap-1 mb-1.5">
-                        <Icon name="piggy-bank" size={10} className="opacity-50"/>
-                        <p className="text-label opacity-50" style={{fontSize:'8px'}}>貯金</p>
-                    </div>
-                    <p className={`font-black tabular-nums ${savingsActual >= 0 ? 'text-amber-200' : 'text-rose-300'}`} style={{fontSize:'var(--fs-sm)'}}>
-                        {income > 0 ? `¥${fmt(savingsActual)}` : '—'}
-                    </p>
-                    {savingsGoal > 0 ? (
-                        <>
-                            <p className="text-label opacity-30 mt-1" style={{fontSize:'8px'}}>目標 ¥{fmt(savingsGoal)}</p>
-                            <div className="w-full bg-black/20 h-1 rounded-full overflow-hidden mt-1">
-                                <div className="h-full bg-amber-400 rounded-full bar-anim" style={{width:`${Math.min(100, savingsPct||0)}%`}}/>
+                        {/* 収支フロー */}
+                        <div className="bg-white/10 rounded-[1.5rem] border border-white/10 px-5 py-4 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                                <span className="text-caption text-blue-200 flex items-center gap-1.5">
+                                    <Icon name="trending-up" size={12}/>収入
+                                </span>
+                                <span className="font-black text-white tabular-nums">¥{fmt(totalIncome)}</span>
                             </div>
-                        </>
-                    ) : (
-                        <p className="text-label opacity-30 mt-1" style={{fontSize:'8px'}}>目標をタップで設定</p>
+                            {totalFixed > 0 && (
+                                <div className="flex items-center justify-between">
+                                    <span className="text-caption text-amber-300 flex items-center gap-1.5 ml-3">
+                                        <Icon name="repeat" size={12}/>固定費
+                                    </span>
+                                    <span className="text-caption text-amber-200 tabular-nums">− ¥{fmt(totalFixed)}</span>
+                                </div>
+                            )}
+                            <div className="flex items-center justify-between">
+                                <span className="text-caption text-rose-300 flex items-center gap-1.5 ml-3">
+                                    <Icon name="trending-down" size={12}/>変動費
+                                </span>
+                                <span className="text-caption text-rose-200 tabular-nums">− ¥{fmt(totalVariable)}</span>
+                            </div>
+                            <div className="border-t border-white/15 pt-2.5 flex items-center justify-between">
+                                <span className="text-caption font-black text-white">貯金</span>
+                                <span className={`font-black tabular-nums ${savings >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                    {savings < 0 ? '−' : '+'} ¥{fmt(Math.abs(savings))}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* ── 予算残高（変動費管理）コンパクト ── */}
+                    {budget > 0 && (
+                        <div className="flex items-center gap-4 bg-white/10 rounded-[1.75rem] border border-white/10 px-4 py-3">
+                            <div className="relative shrink-0">
+                                <svg width="92" height="92" viewBox="0 0 92 92">
+                                    <circle cx="46" cy="46" r={Rs} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="9"/>
+                                    <circle cx="46" cy="46" r={Rs} fill="none" stroke={barColor} strokeWidth="9"
+                                        strokeLinecap="round" strokeDasharray={circS} strokeDashoffset={offsetS}
+                                        transform="rotate(-90 46 46)" className="donut-anim"
+                                        style={{filter:`drop-shadow(0 0 4px ${barColor}88)`}}/>
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <span className="font-black tabular-nums" style={{fontSize:'13px'}}>{Math.round(pct)}%</span>
+                                    <span className="text-white/50" style={{fontSize:'8px'}}>変動費</span>
+                                </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-label text-blue-200 mb-0.5" style={{fontSize:'9px'}}>予算残高（変動費のみ）</p>
+                                <p className={`font-black tabular-nums ${isOver?'text-rose-300':isWarn?'text-amber-300':'text-white'}`} style={{fontSize:'var(--fs-xl)'}}>
+                                    ¥{fmt(balance)}{isOver && <span className="ml-1 text-sm opacity-70">超過</span>}
+                                </p>
+                                <p className="text-label text-blue-200 mt-0.5" style={{fontSize:'9px'}}>
+                                    ¥{fmt(totalVariable)} / ¥{fmt(budget)}
+                                    {dailyBudget !== null && <span className="ml-2">・1日 <span className="text-white font-black">¥{fmt(dailyBudget)}</span>（残{remainingDays}日）</span>}
+                                </p>
+                            </div>
+                            <button onClick={onEditBudget} className="shrink-0 w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center opacity-60 hover:opacity-100 active:scale-90 transition-all">
+                                <Icon name="edit-3" size={13}/>
+                            </button>
+                        </div>
                     )}
-                </button>
-
-                <div className="bg-white/10 rounded-[1.5rem] border border-white/10 p-3">
-                    <div className="flex items-center gap-1 mb-1.5">
-                        <Icon name="sparkles" size={10} className="opacity-50"/>
-                        <p className="text-label opacity-50" style={{fontSize:'8px'}}>自由予算</p>
+                </>
+            ) : (
+                <>
+                    {/* ── 収入未記録: 予算残高メイン ── */}
+                    <div className="flex items-center gap-6 mb-5">
+                        <div className="relative shrink-0">
+                            <svg width="128" height="128" viewBox="0 0 128 128">
+                                <circle cx="64" cy="64" r={R} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="12"/>
+                                <circle cx="64" cy="64" r={R} fill="none" stroke={barColor} strokeWidth="12"
+                                    strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={offset}
+                                    transform="rotate(-90 64 64)" className="donut-anim"
+                                    style={{filter:`drop-shadow(0 0 6px ${barColor}88)`}}/>
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                <span className="text-2xl font-black tabular-nums leading-none">{Math.round(pct)}%</span>
+                                <span className="text-label text-white/50 mt-0.5" style={{fontSize:'9px'}}>使用中</span>
+                            </div>
+                        </div>
+                        <div className="flex-1 min-w-0 anim-countup">
+                            <p className="text-label text-blue-200 mb-1" style={{fontSize:'10px'}}>予算残高</p>
+                            <p className={`font-black tabular-nums tracking-tighter leading-none mb-2 ${isOver?'text-rose-300':'text-white'}`}
+                               style={{fontSize:'clamp(28px,7vw,40px)'}}>
+                                <span className="opacity-40 mr-0.5" style={{fontSize:'60%'}}>¥</span>
+                                {fmt(balance)}
+                                {isOver && <span className="ml-1 opacity-70" style={{fontSize:'50%'}}>超過</span>}
+                            </p>
+                            <p className={`text-caption ${isOver?'text-rose-300':isWarn?'text-amber-300':'text-emerald-300'}`}>
+                                {isOver ? `¥${fmt(Math.abs(balance))} オーバー` : isWarn ? `残り ¥${fmt(balance)} — 注意` : `変動費 ¥${fmt(totalVariable)} 使用`}
+                            </p>
+                            {dailyBudget !== null && (
+                                <p className="text-caption text-blue-200 mt-1.5" style={{fontSize:'11px'}}>
+                                    1日あたり <span className="font-black text-white">¥{fmt(dailyBudget)}</span>
+                                    <span className="opacity-60 ml-1">（残り{remainingDays}日）</span>
+                                </p>
+                            )}
+                        </div>
                     </div>
-                    <p className={`font-black tabular-nums ${isOverFree && income>0 ? 'text-rose-300' : 'text-emerald-300'}`}
-                       style={{fontSize:'var(--fs-sm)'}}>
-                        {income > 0 ? `¥${fmt(freeBudget)}` : '—'}
-                    </p>
-                    <p className="text-label opacity-30 mt-1" style={{fontSize:'8px'}}>
-                        {income > 0 ? `収入-固定-貯金` : '収入を設定'}
-                    </p>
-                </div>
-            </div>
-
-            {/* 自由予算 使用状況バー */}
-            {freeBudget > 0 && (
-                <div className="bg-white/10 rounded-[2rem] border border-white/10 px-4 py-3">
-                    <div className="flex justify-between items-center mb-2.5">
-                        <p className="text-label text-blue-200" style={{fontSize:'9px'}}>自由予算の使用状況</p>
-                        <p className={`font-black text-sm ${isOverFree ? 'text-rose-300' : isWarnFree ? 'text-amber-300' : 'text-emerald-300'}`}>
-                            {isOverFree ? `¥${fmt(Math.abs(freeRemaining))} 超過` : `残り ¥${fmt(freeRemaining)}`}
-                        </p>
+                    <div className="bg-white/10 rounded-[1.75rem] border border-white/10 px-5 py-3 flex items-center gap-2 mb-3">
+                        <Icon name="info" size={13} className="opacity-50 shrink-0"/>
+                        <p className="text-label opacity-50" style={{fontSize:'10px'}}>収入タブで収入を記録すると貯金額が表示されます</p>
                     </div>
-                    <div className="w-full bg-black/20 h-2.5 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full bar-anim" style={{width:`${Math.min(100,freePct)}%`, backgroundColor:barColor}}/>
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={onEditBudget} className="bg-white/10 hover:bg-white/20 active:scale-95 transition-all p-3 rounded-[1.5rem] border border-white/10 text-left">
+                            <p className="text-label opacity-60 mb-1.5" style={{fontSize:'8px'}}>予算</p>
+                            <p className="font-black tabular-nums" style={{fontSize:'var(--fs-base)'}}>¥{fmt(budget)}</p>
+                        </button>
+                        <div className="bg-white/10 p-3 rounded-[1.5rem] border border-white/10 text-left">
+                            <p className="text-label opacity-60 mb-1.5" style={{fontSize:'8px'}}>変動費</p>
+                            <p className="font-black tabular-nums text-rose-200" style={{fontSize:'var(--fs-base)'}}>¥{fmt(totalVariable)}</p>
+                        </div>
+                        <div className="bg-white/10 p-3 rounded-[1.5rem] border border-white/10 text-left">
+                            <p className="text-label opacity-60 mb-1.5" style={{fontSize:'8px'}}>固定費</p>
+                            <p className="font-black tabular-nums text-amber-200" style={{fontSize:'var(--fs-base)'}}>¥{fmt(totalFixed)}</p>
+                        </div>
                     </div>
-                    <div className="flex justify-between mt-1.5">
-                        <span className="text-label opacity-40" style={{fontSize:'8px'}}>変動支出 ¥{fmt(variableSpent)}</span>
-                        <span className="text-label opacity-40" style={{fontSize:'8px'}}>
-                            {Math.round(freePct)}%
-                            {dailyFree !== null && ` · 1日あたり ¥${fmt(dailyFree)}（残${remainingDays}日）`}
-                        </span>
-                    </div>
-                </div>
+                </>
             )}
         </div>
     );
 };
 
-// ─── IncomeModal ──────────────────────────────────────────────────────────────
-const IncomeModal = ({current, onSave, onClose}) => {
-    const [val, setVal] = useState(current||'');
-    const handleSave = () => { if (Number(val) >= 0) { onSave(Number(val)); onClose(); } };
+// ─── BudgetModal ──────────────────────────────────────────────────────────────
+const BudgetModal = ({current, currentMonth, onSave, onClose}) => {
+    const [val,        setVal]        = useState(current||'');
+    const [lastBudget, setLastBudget] = useState(null);
+
+    useEffect(() => {
+        const [y, m] = currentMonth.split('-').map(Number);
+        const d = new Date(y, m - 2, 1);
+        const prevMonth = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        db.collection('months').doc(prevMonth).get()
+            .then(doc => {
+                if (doc.exists && Number(doc.data().budget) > 0) setLastBudget(Number(doc.data().budget));
+            }).catch(() => {});
+    }, [currentMonth]);
+
+    const handleSave = () => { if (Number(val) > 0) { onSave(Number(val)); onClose(); } };
+
     return (
-        <div className="mb-6 bg-white p-6 rounded-[2.5rem] shadow-2xl border-2 border-indigo-500 anim-slide relative z-20">
-            <div className="flex justify-between items-center mb-6">
-                <h3 className="font-black text-slate-800 text-label">今月の収入を設定</h3>
-                <button onClick={onClose} className="text-slate-300"><Icon name="x" size={20}/></button>
-            </div>
-            <div className="relative mb-8">
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
-                <input type="number" inputMode="numeric"
-                    className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800"
-                    style={{fontSize:'var(--fs-3xl)'}}
-                    value={val}
-                    onChange={e=>setVal(e.target.value)}
-                    onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
-                    autoFocus/>
-            </div>
-            <button onClick={handleSave}
-                className="w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all bg-indigo-600 text-white">
-                この金額で確定する
-            </button>
-        </div>
-    );
-};
-
-// ─── SavingsModal ─────────────────────────────────────────────────────────────
-const SavingsModal = ({currentGoal, savingsActual, onSave, onClose}) => {
-    const [goal, setGoal] = useState(currentGoal || '');
-    const handleSave = () => { onSave(Number(goal)||0); onClose(); };
-    const pct = (Number(goal) > 0 && savingsActual > 0)
-        ? Math.min(100, Math.round((savingsActual / Number(goal)) * 100)) : 0;
-    return (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
-            <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10" onClick={e=>e.stopPropagation()}>
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"/>
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-amber-50 rounded-2xl flex items-center justify-center">
-                        <Icon name="piggy-bank" size={20} className="text-amber-500"/>
+        <Portal>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
+                <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10"
+                     onClick={e=>e.stopPropagation()}>
+                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"/>
+                    <p className="text-label text-slate-400 text-center mb-1" style={{fontSize:'10px'}}>今月の予算を設定</p>
+                    <div className="relative mb-4">
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
+                        <input type="number" inputMode="numeric"
+                            className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800 text-center"
+                            style={{fontSize:'var(--fs-3xl)'}}
+                            value={val}
+                            onChange={e=>setVal(e.target.value)}
+                            onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
+                            autoFocus/>
                     </div>
-                    <h3 className="font-black text-slate-800" style={{fontSize:'var(--fs-xl)'}}>貯金目標を設定</h3>
-                </div>
-
-                {/* 現在の貯金額（自動計算） */}
-                <div className="bg-amber-50 rounded-2xl px-4 py-3 mb-5">
-                    <p className="text-caption text-amber-600 mb-1">今月の貯金額（自動計算）</p>
-                    <p className={`font-black tabular-nums ${savingsActual >= 0 ? 'text-amber-700' : 'text-rose-500'}`}
-                       style={{fontSize:'var(--fs-2xl)'}}>
-                        ¥{fmt(savingsActual)}
-                    </p>
-                    <p className="text-label text-amber-500 mt-1" style={{fontSize:'9px'}}>収入 − 総支出でリアルタイム計算</p>
-                </div>
-
-                {/* 目標額入力 */}
-                <div className="mb-5">
-                    <p className="text-caption text-slate-400 mb-2">今月の貯金目標</p>
-                    <div className="relative flex items-center bg-slate-50 rounded-2xl px-4 py-3 border-2 border-transparent focus-within:border-indigo-200">
-                        <span className="text-xl font-black text-slate-300 mr-2">¥</span>
-                        <input type="number" inputMode="numeric" placeholder="30,000"
-                            className="flex-1 outline-none bg-transparent font-black text-slate-800"
-                            style={{fontSize:'var(--fs-xl)'}}
-                            value={goal} onChange={e=>setGoal(e.target.value)} autoFocus
-                            onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}/>
+                    {lastBudget ? (
+                        <button onClick={()=>setVal(String(lastBudget))}
+                            className="w-full mb-6 flex items-center justify-center gap-2 py-2.5 rounded-2xl border-2 border-dashed border-slate-200 text-caption text-slate-400 hover:border-indigo-300 hover:text-indigo-500 transition-all active:scale-95">
+                            <Icon name="copy" size={13}/>
+                            先月と同じ（¥{fmt(lastBudget)}）
+                        </button>
+                    ) : <div className="mb-6"/>}
+                    <div className="flex flex-col gap-3">
+                        <button onClick={handleSave} disabled={!(Number(val)>0)}
+                            className={`w-full py-5 rounded-2xl font-black shadow-lg shadow-indigo-100 active:scale-95 transition-all ${Number(val)>0?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                            この金額で確定する
+                        </button>
+                        <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption text-center">キャンセル</button>
                     </div>
                 </div>
-
-                {/* 達成率バー */}
-                {Number(goal) > 0 && (
-                    <div className="mb-5 bg-slate-50 rounded-2xl px-4 py-3">
-                        <div className="flex justify-between items-center mb-2">
-                            <span className="text-caption text-slate-500">目標達成率</span>
-                            <span className={`font-black ${pct >= 100 ? 'text-emerald-600' : 'text-amber-600'}`}>{pct}%</span>
-                        </div>
-                        <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full bar-anim ${pct >= 100 ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                                 style={{width:`${pct}%`}}/>
-                        </div>
-                    </div>
-                )}
-
-                <button onClick={handleSave}
-                    className="w-full py-5 rounded-2xl font-black bg-indigo-600 text-white shadow-lg shadow-indigo-100 active:scale-95 transition-all">
-                    保存する
-                </button>
-                {currentGoal > 0 && (
-                    <button onClick={()=>{ onSave(0); onClose(); }}
-                        className="w-full py-3 rounded-2xl font-black border-2 border-slate-200 text-slate-400 active:scale-95 transition-all mt-2">
-                        目標を削除する
-                    </button>
-                )}
-                <button onClick={onClose} className="w-full text-slate-400 py-3 font-black text-caption text-center mt-1">キャンセル</button>
             </div>
-        </div>
+        </Portal>
     );
 };
 
@@ -617,16 +680,17 @@ const ExpenseForm = ({tags, onAdd}) => {
     const [amount,  setAmount]  = useState('');
     const [tag,     setTag]     = useState('');
     const [dateStr, setDateStr] = useState(() => toLocalDateStr(Date.now()));
+    const [isFixed, setIsFixed] = useState(false);
     const nameRef=useRef(null), amountRef=useRef(null);
     const canSubmit = name.trim().length > 0 && Number(amount) > 0;
 
     const handleSubmit = useCallback(async (e) => {
         e.preventDefault();
         if (!canSubmit) return;
-        await onAdd({name:name.trim(), amount:Number(amount), tag:tag||'未分類', date:dateStr});
-        setName(''); setAmount(''); setTag(''); setDateStr(toLocalDateStr(Date.now()));
+        await onAdd({name:name.trim(), amount:Number(amount), tag:tag||'未分類', date:dateStr, isFixed});
+        setName(''); setAmount(''); setTag(''); setDateStr(toLocalDateStr(Date.now())); setIsFixed(false);
         requestAnimationFrame(() => nameRef.current?.focus());
-    }, [name, amount, tag, dateStr, canSubmit, onAdd]);
+    }, [name, amount, tag, dateStr, isFixed, canSubmit, onAdd]);
 
     return (
         <div className="bg-white p-7 rounded-[3rem] shadow-sm border border-slate-100 mb-8 mt-12">
@@ -667,6 +731,14 @@ const ExpenseForm = ({tags, onAdd}) => {
                             </button>
                         );
                     })}
+                </div>
+                <div className="flex items-center gap-3">
+                    <button type="button" onClick={()=>setIsFixed(p=>!p)}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-caption font-black transition-all border-2 ${isFixed?'bg-amber-50 text-amber-700 border-amber-200':'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                        <Icon name="repeat" size={13}/>
+                        固定費
+                    </button>
+                    {isFixed && <p className="text-caption text-amber-600">予算から引かれません</p>}
                 </div>
                 {!canSubmit && (name.trim()||amount) && (
                     <p className="text-caption text-rose-500 bg-rose-50 border border-rose-100 rounded-2xl px-4 py-3">品目と金額（1円以上）を入力してください</p>
@@ -834,6 +906,7 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
     const [name,     setName]     = useState(item.name);
     const [amount,   setAmount]   = useState(item.amount);
     const [tag,      setTag]      = useState(item.tag);
+    const [isFixed,  setIsFixed]  = useState(!!item.isFixed);
     const [dateStr,  setDateStr]  = useState(() =>
         typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now())
     );
@@ -842,17 +915,17 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
 
     useEffect(() => {
         if (!editing) {
-            setName(item.name); setAmount(item.amount); setTag(item.tag);
+            setName(item.name); setAmount(item.amount); setTag(item.tag); setIsFixed(!!item.isFixed);
             setDateStr(typeof item.createdAtMillis === 'number' ? toLocalDateStr(item.createdAtMillis) : toLocalDateStr(Date.now()));
         }
-    }, [item.name, item.amount, item.tag, item.createdAtMillis, editing]);
+    }, [item.name, item.amount, item.tag, item.isFixed, item.createdAtMillis, editing]);
 
     const handleSave = useCallback(async () => {
         if (!name.trim() || Number(amount) <= 0) return;
         const newMs = dateStr ? fromLocalDateStr(dateStr, item.createdAtMillis) : item.createdAtMillis;
-        await onSave(item.id, {name:name.trim(), amount:Number(amount), tag, createdAtMillis:newMs});
+        await onSave(item.id, {name:name.trim(), amount:Number(amount), tag, isFixed, createdAtMillis:newMs});
         setEditing(false);
-    }, [item.id, item.createdAtMillis, name, amount, tag, dateStr, onSave]);
+    }, [item.id, item.createdAtMillis, name, amount, tag, isFixed, dateStr, onSave]);
 
     if (editing) return (
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
@@ -877,6 +950,11 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
                             className={`px-4 py-2 rounded-xl text-caption transition-all border-2 ${tag===t?`${tc.bg} ${tc.text} border-white/20`:'bg-white border-slate-200 text-slate-400'}`}>{t}</button>
                     );})}
                 </div>
+                <button type="button" onClick={()=>setIsFixed(p=>!p)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-caption font-black transition-all border-2 ${isFixed?'bg-amber-50 text-amber-700 border-amber-200':'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                    <Icon name="repeat" size={13}/>
+                    固定費 {isFixed ? 'ON' : 'OFF'}
+                </button>
                 <div className="flex gap-3">
                     <button onClick={handleSave} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-md active:scale-95 transition-all">保存</button>
                     <button onClick={()=>setEditing(false)} className="flex-1 bg-white text-slate-400 py-4 rounded-2xl font-black border border-slate-200 active:scale-95 transition-all">取消</button>
@@ -897,6 +975,7 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
                             <p className="font-black text-slate-800 leading-tight truncate" style={{fontSize:'var(--fs-base)'}}>{item.name}</p>
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                                 <span className={`text-caption px-2 py-0.5 rounded-md ${c.bg} ${c.text} shrink-0`}>{displayTag}</span>
+                                {item.isFixed && <span className="text-caption px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 shrink-0">固定費</span>}
                                 <span className="text-caption text-slate-400">{fmtRelativeDate(item)}</span>
                             </div>
                         </div>
@@ -930,16 +1009,20 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
 
 // ─── HomeView ─────────────────────────────────────────────────────────────────
 // ホーム画面。別月表示バナー・カテゴリフィルター・支出履歴リスト。
-const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savingsActual, fixedTags, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
-    const [showIncome,   setShowIncome]   = useState(false);
-    const [showSavings,  setShowSavings]  = useState(false);
-    const [undoToast,    setUndoToast]    = useState(null);
-    const [confirmDel,   setConfirmDel]   = useState(null);
-    const [filterTag,    setFilterTag]    = useState(null);
+const HomeView = ({budget, tagBudgets, expenses, incomes, tags, fixedTemplates, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
+    const [showBudget,       setShowBudget]       = useState(false);
+    const [undoToast,        setUndoToast]        = useState(null);
+    const [confirmDel,       setConfirmDel]       = useState(null);
+    const [confirmDelIncome, setConfirmDelIncome] = useState(null);
+    const [filterTag,        setFilterTag]        = useState(null);
+    const [searchQuery,      setSearchQuery]      = useState('');
+    const [recordType,       setRecordType]       = useState('expense');
     const undoTimer = useRef(null);
 
-    const totalSpent = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
-    const fixedSpent = useMemo(() => expenses.filter(e=>fixedTags.includes(e.tag)).reduce((s,e)=>s+e.amount, 0), [expenses, fixedTags]);
+    const totalFixed    = useMemo(() => expenses.filter(e=>e.isFixed).reduce((s,e)=>s+e.amount, 0),  [expenses]);
+    const totalVariable = useMemo(() => expenses.filter(e=>!e.isFixed).reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalSpent    = totalFixed + totalVariable;
+    const totalIncome   = useMemo(() => incomes.reduce((s,i)=>s+i.amount, 0), [incomes]);
 
     // 別月表示中かどうか
     const isCurrentMonth = currentMonth === monthStr();
@@ -959,13 +1042,13 @@ const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savi
         [...new Set(expenses.map(e=>e.tag))],
     [expenses]);
 
-    const handleAdd = useCallback(async ({name, amount, tag, date}) => {
+    const handleAdd = useCallback(async ({name, amount, tag, date, isFixed}) => {
         try {
             const createdAtMillis = date ? fromLocalDateStr(date, Date.now()) : nowMs();
             const targetMonth = monthStr(new Date(createdAtMillis));
             const targetRef = targetMonth === currentMonth ? monthRef : db.collection('months').doc(targetMonth);
             await targetRef.collection('expenses').doc().set({
-                name, amount, tag, createdAtMillis, createdAt:FieldValue.serverTimestamp()
+                name, amount, tag, isFixed: !!isFixed, createdAtMillis, createdAt:FieldValue.serverTimestamp()
             });
             showToast('記録を保存しました', 'success');
         } catch(e) { showToast('保存に失敗しました', 'error'); }
@@ -1060,11 +1143,7 @@ const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savi
 
     return (
         <div className="anim-slide">
-            <MonthlySummaryCard
-                totalSpent={totalSpent} fixedSpent={fixedSpent}
-                income={income} savingsGoal={savingsGoal}
-                onEditIncome={()=>setShowIncome(true)} onEditSavings={()=>setShowSavings(true)}
-                currentMonth={currentMonth}/>
+            <MonthlySummaryCard budget={budget} totalFixed={totalFixed} totalVariable={totalVariable} totalIncome={totalIncome} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
 
             <div className="px-6">
                 {/* 別月閲覧バナー */}
@@ -1079,8 +1158,8 @@ const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savi
                     </div>
                 )}
 
-                {showIncome && (
-                    <IncomeModal current={income} onSave={v=>updateFirebase({income:v})} onClose={()=>setShowIncome(false)}/>
+                {showBudget && (
+                    <BudgetModal current={budget} currentMonth={currentMonth} onSave={v=>updateFirebase({budget:v})} onClose={()=>setShowBudget(false)}/>
                 )}
 
                 {/* 支出 / 収入 タブ切替 */}
@@ -1094,6 +1173,24 @@ const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savi
                         <Icon name="trending-up" size={13}/> 収入
                     </button>
                 </div>
+
+                {recordType === 'expense' && fixedTemplates && fixedTemplates.length > 0 && (
+                    <div className="mt-5 bg-amber-50 border border-amber-100 rounded-[2.5rem] p-5">
+                        <h3 className="text-label text-amber-600 mb-3 flex items-center gap-2" style={{fontSize:'10px'}}>
+                            <Icon name="repeat" size={12}/> 固定費テンプレート
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                            {fixedTemplates.map((t, i) => (
+                                <button key={i} type="button"
+                                    onClick={()=>handleAdd({name:t.name, amount:t.amount, tag:t.tag||'固定費', date:toLocalDateStr(Date.now()), isFixed:true})}
+                                    className="flex items-center gap-1.5 px-4 py-2.5 bg-white border border-amber-200 rounded-xl text-caption text-amber-700 font-black hover:bg-amber-50 active:scale-95 transition-all">
+                                    <Icon name="plus" size={11}/>
+                                    {t.name}　¥{fmt(t.amount)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {recordType === 'expense' ? (
                     <ExpenseForm tags={tags} onAdd={handleAdd}/>
@@ -1224,58 +1321,26 @@ const HomeView = ({budget, tagBudgets, expenses, tags, income, savingsGoal, savi
                 <Portal><UndoToast toast={undoToast} onUndo={handleUndo}
                     onClose={()=>{ clearTimeout(undoTimer.current); setUndoToast(null); }}/></Portal>
             )}
-            {showSavings && (
-                <Portal><SavingsModal
-                    currentGoal={savingsGoal}
-                    savingsActual={income > 0 ? income - totalSpent : 0}
-                    onSave={g=>updateFirebase({savingsGoal:g})}
-                    onClose={()=>setShowSavings(false)}/></Portal>
-            )}
         </div>
     );
 };
 
 // ─── TagBudgetModal ───────────────────────────────────────────────────────────
-// カテゴリ予算編集。remaining=このカテゴリに割り当てられる上限（自由予算-他カテゴリの合計）
-const TagBudgetModal = ({tag, current, remaining, onSave, onClose}) => {
+// カテゴリ予算編集用ボトムシートモーダル
+const TagBudgetModal = ({tag, current, onSave, onClose}) => {
     const [val, setVal] = useState(current || '');
-    const numVal    = Number(val) || 0;
-    const isOver    = remaining !== null && numVal > remaining;
-    const afterSet  = remaining !== null ? remaining - numVal : null;
-    const handleSave = () => { onSave(numVal); onClose(); };
+    const handleSave = () => { onSave(Number(val)); onClose(); };
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-end justify-center anim-fade" onClick={onClose}>
             <div className="bg-white w-full max-w-md rounded-t-[3.5rem] shadow-2xl anim-slideup p-8 pb-10"
                  onClick={e=>e.stopPropagation()}>
-                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6"/>
+                <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"/>
                 <p className="text-label text-slate-400 text-center mb-1" style={{fontSize:'10px'}}>カテゴリ予算を設定</p>
-                <h3 className="font-black text-slate-800 text-center tracking-tighter mb-5" style={{fontSize:'var(--fs-xl)'}}>{tag}</h3>
-
-                {/* 残り配分可能額 */}
-                {remaining !== null && (
-                    <div className={`rounded-2xl px-4 py-3 mb-5 ${isOver ? 'bg-rose-50' : 'bg-indigo-50'}`}>
-                        <div className="flex justify-between items-center">
-                            <span className={`text-caption ${isOver ? 'text-rose-500' : 'text-indigo-500'}`}>
-                                {isOver ? '⚠ 自由予算を超えています' : '配分可能な残り予算'}
-                            </span>
-                            <span className={`font-black tabular-nums ${isOver ? 'text-rose-600' : 'text-indigo-700'}`}
-                                  style={{fontSize:'var(--fs-base)'}}>
-                                ¥{fmt(remaining)}
-                            </span>
-                        </div>
-                        {numVal > 0 && afterSet !== null && (
-                            <p className={`text-label mt-1 ${isOver ? 'text-rose-400' : 'text-indigo-400'}`}
-                               style={{fontSize:'9px'}}>
-                                設定後の残り: {afterSet >= 0 ? `¥${fmt(afterSet)}` : `-¥${fmt(Math.abs(afterSet))}`}
-                            </p>
-                        )}
-                    </div>
-                )}
-
-                <div className="relative mb-6">
+                <h3 className="font-black text-slate-800 text-center tracking-tighter mb-8" style={{fontSize:'var(--fs-xl)'}}>{tag}</h3>
+                <div className="relative mb-8">
                     <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-300">¥</span>
                     <input type="number" inputMode="numeric"
-                        className={`w-full pl-8 p-2 border-b-4 outline-none bg-transparent font-black text-slate-800 text-center ${isOver ? 'border-rose-400' : 'border-indigo-500'}`}
+                        className="w-full pl-8 p-2 border-b-4 border-indigo-500 outline-none bg-transparent font-black text-slate-800 text-center"
                         style={{fontSize:'var(--fs-3xl)'}}
                         value={val}
                         onChange={e=>setVal(e.target.value)}
@@ -1284,8 +1349,8 @@ const TagBudgetModal = ({tag, current, remaining, onSave, onClose}) => {
                 </div>
                 <div className="flex flex-col gap-3">
                     <button onClick={handleSave}
-                        className={`w-full py-5 rounded-2xl font-black shadow-lg active:scale-95 transition-all ${isOver ? 'bg-rose-500 text-white shadow-rose-100' : 'bg-indigo-600 text-white shadow-indigo-100'}`}>
-                        {isOver ? '超過して設定する' : 'この金額で確定する'}
+                        className="w-full py-5 rounded-2xl font-black bg-indigo-600 text-white shadow-lg shadow-indigo-100 active:scale-95 transition-all">
+                        この金額で確定する
                     </button>
                     {current > 0 && (
                         <button onClick={()=>{ onSave(0); onClose(); }}
@@ -1360,7 +1425,7 @@ const MonthlyTrendChart = ({data, currentMonth}) => {
 // ─── ReportView ───────────────────────────────────────────────────────────────
 // レポート画面。月次概要・カテゴリ別割合・予算管理・支出詳細モーダル。
 // カテゴリは支出額の多い順に表示する。
-const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, fixedTags, savingsGoal, updateFirebase}) => {
+const ReportView = ({currentMonth, budget, tagBudgets, expenses, incomes, tags, updateFirebase, updateTags}) => {
     const [selectedTag,      setSelectedTag]      = useState(null);
     const [isAddingTag,      setIsAddingTag]       = useState(false);
     const [editingBudgetTag, setEditingBudgetTag]  = useState(null);
@@ -1376,24 +1441,10 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
         return s;
     }, [expenses, tags, tagBudgets]);
 
-    const totalSpent  = useMemo(() => expenses.reduce((s,e)=>s+e.amount, 0), [expenses]);
-    const totalIncome = useMemo(() => incomes.reduce((s,i)=>s+i.amount,  0), [incomes]);
-
-    // 自由予算 = 収入 - 固定費実績 - 貯金目標
-    const fixedSpent = useMemo(() =>
-        expenses.filter(e=>fixedTags.includes(e.tag)).reduce((s,e)=>s+e.amount, 0),
-    [expenses, fixedTags]);
-
-    const freeBudget = income > 0 ? Math.max(0, income - fixedSpent - savingsGoal) : null;
-
-    // 変動カテゴリの予算合計（固定費カテゴリは除く）
-    const totalVariableTagBudget = useMemo(() =>
-        tags.filter(t => !fixedTags.includes(t))
-            .reduce((s,t) => s + (tagBudgets[t] || 0), 0),
-    [tags, fixedTags, tagBudgets]);
-
-    const remainingToAllocate = freeBudget !== null ? freeBudget - totalVariableTagBudget : null;
-    const allocPct = freeBudget > 0 ? Math.min(100, (totalVariableTagBudget / freeBudget) * 100) : 0;
+    const totalFixed    = useMemo(() => expenses.filter(e=>e.isFixed).reduce((s,e)=>s+e.amount, 0),  [expenses]);
+    const totalVariable = useMemo(() => expenses.filter(e=>!e.isFixed).reduce((s,e)=>s+e.amount, 0), [expenses]);
+    const totalSpent    = totalFixed + totalVariable;
+    const totalIncome   = useMemo(() => incomes.reduce((s,i)=>s+i.amount, 0), [incomes]);
 
     // 支出があるカテゴリ（支出額の多い順）
     const activeTags = useMemo(() =>
@@ -1408,13 +1459,6 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
         if (!editingBudgetTag) return;
         updateFirebase({tagBudgets:{...tagBudgets, [editingBudgetTag]:val}});
     }, [editingBudgetTag, tagBudgets, updateFirebase]);
-
-    // モーダルに渡す残り配分可能額（編集中カテゴリの現在値を除いた残り）
-    const editingRemaining = useMemo(() => {
-        if (remainingToAllocate === null || !editingBudgetTag) return null;
-        const currentVal = fixedTags.includes(editingBudgetTag) ? null : (tagBudgets[editingBudgetTag] || 0);
-        return currentVal !== null ? remainingToAllocate + currentVal : null;
-    }, [remainingToAllocate, editingBudgetTag, tagBudgets, fixedTags]);
 
     // 選択カテゴリの支出一覧と合計
     const selectedExpenses = useMemo(() =>
@@ -1463,16 +1507,17 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
                 <p className="text-label text-slate-400 mb-4 flex items-center gap-2">
                     <span className="w-2 h-2 bg-indigo-500 rounded-full"/> 今月の概要
                 </p>
-                <div className="grid grid-cols-3 gap-3 mb-3">
+                <div className="grid grid-cols-2 gap-3 mb-3">
                     {[
-                        {label:'予算',  value:budget,            color:'text-slate-800'},
-                        {label:'支出',  value:totalSpent,        color:'text-rose-500'},
-                        {label:'残高',  value:budget-totalSpent, color:(budget-totalSpent)<0?'text-rose-500':'text-emerald-600'},
+                        {label:'予算',   value:budget,                  color:'text-slate-800'},
+                        {label:'残高',   value:budget-totalVariable,    color:(budget-totalVariable)<0?'text-rose-500':'text-emerald-600'},
+                        {label:'変動費', value:totalVariable,           color:'text-rose-500'},
+                        {label:'固定費', value:totalFixed,              color:'text-amber-600'},
                     ].map(({label, value, color}) => (
                         <div key={label} className="bg-slate-50 rounded-2xl p-3 text-center">
                             <p className="text-label text-slate-400 mb-1" style={{fontSize:'9px'}}>{label}</p>
                             <p className={`font-black tabular-nums ${color}`} style={{fontSize:'var(--fs-base)'}}>
-                                {value<0?'-':''}¥{fmt(value)}
+                                {value<0?'-':''}¥{fmt(Math.abs(value))}
                             </p>
                         </div>
                     ))}
@@ -1484,9 +1529,9 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
                             {totalIncome > 0 ? `¥${fmt(totalIncome)}` : '—'}
                         </p>
                     </div>
-                    <div className={`rounded-2xl p-3 text-center ${(totalIncome-totalSpent)>=0?'bg-emerald-50':'bg-rose-50'}`}>
-                        <p className={`text-label mb-1 ${(totalIncome-totalSpent)>=0?'text-emerald-500':'text-rose-400'}`} style={{fontSize:'9px'}}>収支</p>
-                        <p className={`font-black tabular-nums ${(totalIncome-totalSpent)>=0?'text-emerald-600':'text-rose-500'}`} style={{fontSize:'var(--fs-base)'}}>
+                    <div className={`rounded-2xl p-3 text-center ${totalIncome > 0 ? ((totalIncome-totalSpent)>=0?'bg-emerald-50':'bg-rose-50') : 'bg-slate-50'}`}>
+                        <p className={`text-label mb-1 ${totalIncome > 0 ? ((totalIncome-totalSpent)>=0?'text-emerald-500':'text-rose-400') : 'text-slate-400'}`} style={{fontSize:'9px'}}>貯金額</p>
+                        <p className={`font-black tabular-nums ${totalIncome > 0 ? ((totalIncome-totalSpent)>=0?'text-emerald-600':'text-rose-500') : 'text-slate-400'}`} style={{fontSize:'var(--fs-base)'}}>
                             {totalIncome > 0 ? `${(totalIncome-totalSpent)<0?'-':''}¥${fmt(Math.abs(totalIncome-totalSpent))}` : '—'}
                         </p>
                     </div>
@@ -1525,85 +1570,26 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
                 <h3 className="text-label text-slate-400 flex items-center gap-2 mb-4">
                     <span className="w-2 h-2 bg-emerald-500 rounded-full"/> カテゴリ別予算
                 </h3>
-
-                {/* 配分サマリーバー */}
-                {freeBudget !== null && freeBudget > 0 && (
-                    <div className="bg-slate-50 rounded-2xl p-4 mb-4">
-                        <div className="flex justify-between items-center mb-2">
-                            <div>
-                                <p className="text-label text-slate-400" style={{fontSize:'9px'}}>自由予算に対する配分状況</p>
-                                <p className="font-black text-slate-700 tabular-nums mt-0.5" style={{fontSize:'var(--fs-sm)'}}>
-                                    ¥{fmt(totalVariableTagBudget)}
-                                    <span className="text-slate-400 font-normal"> / ¥{fmt(freeBudget)}</span>
-                                </p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-label text-slate-400" style={{fontSize:'9px'}}>残り配分可能</p>
-                                <p className={`font-black tabular-nums mt-0.5 ${remainingToAllocate < 0 ? 'text-rose-500' : 'text-emerald-600'}`}
-                                   style={{fontSize:'var(--fs-sm)'}}>
-                                    {remainingToAllocate >= 0 ? `¥${fmt(remainingToAllocate)}` : `-¥${fmt(Math.abs(remainingToAllocate))}`}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full bar-anim ${remainingToAllocate < 0 ? 'bg-rose-400' : allocPct > 90 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                                 style={{width:`${Math.min(100, allocPct)}%`}}/>
-                        </div>
-                    </div>
-                )}
-                {freeBudget === null && (
-                    <p className="text-caption text-slate-400 bg-amber-50 rounded-xl px-3 py-2 mb-4">
-                        ホームで収入を設定すると、自由予算内での配分管理ができます
-                    </p>
-                )}
-
                 <div className="space-y-2">
                     {tags.map(t => {
-                        const cur     = tagBudgets[t] || 0;
-                        const spent   = tagStats[t]?.spent || 0;
-                        const c       = tagColor(t);
-                        const isFixed = fixedTags.includes(t);
-                        const spentPct = cur > 0 ? Math.min(100, (spent / cur) * 100) : 0;
-                        const isOver  = spent > cur && cur > 0;
+                        const cur   = tagBudgets[t] || 0;
+                        const spent = tagStats[t]?.spent || 0;
+                        const c     = tagColor(t);
                         return (
-                            <div key={t} className="p-3 bg-slate-50 rounded-2xl">
-                                <div className="flex items-center gap-2">
-                                    <button onClick={()=>setSelectedTag(t)}
-                                        className="flex-1 flex items-center gap-2 text-left active:opacity-70 transition-opacity min-w-0">
-                                        <span className={`w-2.5 h-2.5 rounded-full ${c.bg} shrink-0`}/>
-                                        <span className="text-body text-slate-700 flex-1 truncate">{t}</span>
-                                        {isFixed && (
-                                            <span className="text-label text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded-md shrink-0" style={{fontSize:'8px'}}>固定費</span>
-                                        )}
-                                        {spent > 0 && (
-                                            <span className={`text-caption tabular-nums shrink-0 ${isOver ? 'text-rose-500' : 'text-slate-400'}`}>¥{fmt(spent)}</span>
-                                        )}
-                                    </button>
-                                    <button onClick={()=>setEditingBudgetTag(t)}
-                                        className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-xl text-caption active:scale-95 transition-all border ${
-                                            isOver
-                                                ? 'bg-rose-50 border-rose-200 text-rose-500'
-                                                : cur > 0
-                                                    ? 'bg-white border-slate-200 text-slate-600'
-                                                    : 'bg-white border-slate-200 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
-                                        }`}>
-                                        <Icon name="edit-3" size={11}/>
-                                        {cur > 0 ? `¥${fmt(cur)}` : '設定'}
-                                    </button>
-                                </div>
-                                {/* 予算設定済みのカテゴリはミニ進捗バーを表示 */}
-                                {cur > 0 && (
-                                    <div className="mt-2 flex items-center gap-2">
-                                        <div className="flex-1 bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                                            <div className={`h-full rounded-full bar-anim ${isOver ? 'bg-rose-400' : spentPct > 85 ? 'bg-amber-400' : 'bg-emerald-400'}`}
-                                                 style={{width:`${spentPct}%`}}/>
-                                        </div>
-                                        <span className={`text-label tabular-nums shrink-0 ${isOver ? 'text-rose-400' : 'text-slate-400'}`}
-                                              style={{fontSize:'8px'}}>
-                                            {isOver ? `+¥${fmt(spent - cur)}` : `残¥${fmt(cur - spent)}`}
-                                        </span>
-                                    </div>
-                                )}
+                            <div key={t} className="flex items-center gap-2 p-3 bg-slate-50 rounded-2xl">
+                                <button onClick={()=>setSelectedTag(t)}
+                                    className="flex-1 flex items-center gap-3 text-left active:opacity-70 transition-opacity min-w-0">
+                                    <span className={`w-2.5 h-2.5 rounded-full ${c.bg} shrink-0`}/>
+                                    <span className="text-body text-slate-700 flex-1 truncate">{t}</span>
+                                    {spent > 0 && (
+                                        <span className="text-caption text-rose-400 tabular-nums shrink-0">¥{fmt(spent)}</span>
+                                    )}
+                                </button>
+                                <button onClick={()=>setEditingBudgetTag(t)}
+                                    className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-caption text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 active:scale-95 transition-all">
+                                    <Icon name="edit-3" size={11}/>
+                                    {cur > 0 ? `¥${fmt(cur)}` : '予算設定'}
+                                </button>
                             </div>
                         );
                     })}
@@ -1730,7 +1716,6 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
                     <TagBudgetModal
                         tag={editingBudgetTag}
                         current={tagBudgets[editingBudgetTag] || 0}
-                        remaining={editingRemaining}
                         onSave={saveTagBudget}
                         onClose={()=>setEditingBudgetTag(null)}/>
                 </Portal>
@@ -1740,10 +1725,11 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, tags, income, f
 };
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
-// 設定画面。カテゴリ管理（予算額も表示）・CSVエクスポート・アプリ情報。
-const SettingsView = ({tags, tagBudgets, expenses, budget, fixedTags, updateFirebase, showToast}) => {
-    const [confirmDelete, setConfirmDelete] = useState(null);
-    const [isAddingTag,   setIsAddingTag]   = useState(false);
+// 設定画面。カテゴリ管理（予算額も表示）・固定費テンプレート・CSVエクスポート・アプリ情報。
+const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, fixedTemplates, updateFirebase, updateTags, updateFixedTemplates, showToast}) => {
+    const [confirmDelete,    setConfirmDelete]    = useState(null);
+    const [isAddingTag,      setIsAddingTag]      = useState(false);
+    const [isAddingTemplate, setIsAddingTemplate] = useState(false);
 
     const handleDeleteTag = useCallback((tag) => {
         const updated    = tags.filter(t=>t!==tag);
@@ -1801,34 +1787,63 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, fixedTags, updateFire
                         const c     = tagColor(t);
                         const inUse = expenses.some(e=>e.tag===t);
                         const bgt   = tagBudgets[t] || 0;
-                        const isFixed = fixedTags.includes(t);
                         return (
-                            <div key={t} className="flex items-center gap-2 p-3 bg-slate-50 rounded-2xl">
+                            <div key={t} className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl">
                                 <span className={`w-3 h-3 rounded-full ${c.bg} shrink-0`}/>
-                                <span className="flex-1 text-body text-slate-700 min-w-0 truncate">{t}</span>
+                                <span className="flex-1 text-body text-slate-700">{t}</span>
                                 {bgt > 0 && (
-                                    <span className="text-caption text-slate-400 tabular-nums shrink-0">¥{fmt(bgt)}</span>
+                                    <span className="text-caption text-slate-400 tabular-nums">¥{fmt(bgt)}</span>
                                 )}
-                                <button
-                                    onClick={()=>{
-                                        const newFixed = isFixed ? fixedTags.filter(x=>x!==t) : [...fixedTags, t];
-                                        updateFirebase({fixedTags: newFixed});
-                                    }}
-                                    className={`shrink-0 px-2 py-1 rounded-lg text-caption font-black transition-all border ${
-                                        isFixed ? 'bg-slate-800 text-white border-transparent' : 'bg-white border-slate-200 text-slate-400'
-                                    }`}>
-                                    {isFixed ? '固定費✓' : '固定費'}
-                                </button>
+                                {inUse && (
+                                    <span className="text-caption text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-200">使用中</span>
+                                )}
                                 <button
                                     onClick={()=>setConfirmDelete({tag:t, inUse})}
                                     disabled={inUse}
-                                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all shrink-0 ${inUse?'text-slate-300 bg-slate-100 cursor-not-allowed':'text-rose-400 bg-rose-50 hover:bg-rose-100 active:scale-90'}`}>
+                                    className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${inUse?'text-slate-300 bg-slate-100 cursor-not-allowed':'text-rose-400 bg-rose-50 hover:bg-rose-100 active:scale-90'}`}>
                                     <Icon name="trash-2" size={14}/>
                                 </button>
                             </div>
                         );
                     })}
                 </div>
+            </div>
+
+            {/* 固定費テンプレート */}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-label text-slate-400 flex items-center gap-2">
+                        <span className="w-2 h-2 bg-amber-500 rounded-full"/> 固定費テンプレート
+                    </h3>
+                    <button onClick={()=>setIsAddingTemplate(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-xl text-caption active:scale-95 transition-all">
+                        <Icon name="plus" size={12}/> 追加
+                    </button>
+                </div>
+                <p className="text-caption text-slate-400 mb-3" style={{fontSize:'11px'}}>
+                    毎月かかる固定費を登録しておくと、ホーム画面からワンタップで記録できます
+                </p>
+                {(!fixedTemplates || fixedTemplates.length === 0) ? (
+                    <div className="text-center py-6 bg-amber-50 rounded-2xl border border-amber-100">
+                        <Icon name="repeat" size={24} className="mx-auto text-amber-200 mb-2"/>
+                        <p className="text-caption text-slate-400">テンプレートがありません</p>
+                    </div>
+                ) : (
+                    <div className="space-y-2">
+                        {fixedTemplates.map((t, i) => (
+                            <div key={i} className="flex items-center gap-3 p-3 bg-amber-50 rounded-2xl border border-amber-100">
+                                <Icon name="repeat" size={14} className="text-amber-500 shrink-0"/>
+                                <span className="flex-1 text-body text-slate-700">{t.name}</span>
+                                {t.tag && <span className={`text-caption px-2 py-0.5 rounded-md ${tagColor(t.tag).bg} ${tagColor(t.tag).text}`}>{t.tag}</span>}
+                                <span className="text-caption text-amber-700 tabular-nums font-black">¥{fmt(t.amount)}</span>
+                                <button onClick={()=>updateFixedTemplates(fixedTemplates.filter((_,j)=>j!==i))}
+                                    className="w-8 h-8 rounded-xl flex items-center justify-center text-rose-400 bg-rose-50 hover:bg-rose-100 active:scale-90 transition-all">
+                                    <Icon name="trash-2" size={14}/>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* データ管理 */}
@@ -1867,6 +1882,11 @@ const SettingsView = ({tags, tagBudgets, expenses, budget, fixedTags, updateFire
                 <Portal><AddTagModal tags={tags}
                     onAdd={name=>{ updateTags([...tags,name]); showToast(`「${name}」を追加しました`,'success'); }}
                     onClose={()=>setIsAddingTag(false)}/></Portal>
+            )}
+            {isAddingTemplate && (
+                <Portal><AddFixedTemplateModal tags={tags}
+                    onAdd={tmpl=>{ updateFixedTemplates([...(fixedTemplates||[]),tmpl]); showToast(`「${tmpl.name}」を追加しました`,'success'); }}
+                    onClose={()=>setIsAddingTemplate(false)}/></Portal>
             )}
             {confirmDelete && (
                 <Portal><ConfirmModal
@@ -1971,7 +1991,15 @@ const App = () => {
     const toastTimer  = useRef(null);
     const scrollRef   = useRef(null);
 
-    const {budget, tagBudgets, expenses, tags, income, savingsGoal, savingsActual, fixedTags, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
+    // 匿名認証：未認証ユーザーからのアクセスをブロック
+    useEffect(() => {
+        auth.signInAnonymously()
+            .then(() => setAuthReady(true))
+            .catch(() => setAuthReady(true)); // オフライン時も表示継続
+    }, []);
+
+    const {budget, tagBudgets, expenses, incomes, updateFirebase, monthRef, isOnline, isLoading} = useMonthData(currentMonth);
+    const {tags, updateTags, fixedTemplates, updateFixedTemplates} = useGlobalSettings();
 
     const showToast = useCallback((message, type='success') => {
         if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1996,7 +2024,9 @@ const App = () => {
 
     const goToCurrentMonth = useCallback(() => setCurrentMonth(monthStr()), []);
 
-    const commonProps = {budget, tagBudgets, expenses, tags, income, savingsGoal, savingsActual, fixedTags, updateFirebase, monthRef, showToast, currentMonth};
+    const commonProps = {budget, tagBudgets, expenses, incomes, tags, fixedTemplates, updateFirebase, updateTags, updateFixedTemplates, monthRef, showToast, currentMonth};
+
+    if (!authReady) return <LoadingView/>;
 
     return (
         <div className="max-w-md mx-auto bg-slate-50 min-h-screen shadow-2xl flex flex-col relative overflow-x-hidden">
