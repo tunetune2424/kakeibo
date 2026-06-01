@@ -305,6 +305,41 @@ const AddTagModal = ({tags, onAdd, onClose}) => {
     );
 };
 
+// ─── EditTagModal ─────────────────────────────────────────────────────────────
+const EditTagModal = ({tagName, tags, onSave, onClose}) => {
+    const [newName, setNewName] = useState(tagName);
+    const trimmed = newName.trim();
+    const isDup   = trimmed !== tagName && tags.includes(trimmed);
+    const canSave = trimmed && trimmed !== tagName && !isDup;
+    const handleSave = useCallback(() => {
+        if (canSave) { onSave(trimmed); onClose(); }
+    }, [trimmed, canSave, onSave, onClose]);
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-6 anim-fade">
+            <div className="bg-white w-full max-w-xs p-8 rounded-[3.5rem] shadow-2xl anim-zoom">
+                <h3 className="text-label text-slate-400 mb-1 text-center">カテゴリ名を変更</h3>
+                <p className="text-caption text-slate-400 text-center mb-6">{tagName} → 新しい名前</p>
+                <input type="text"
+                    className="w-full p-2 font-black border-b-4 border-indigo-500 outline-none mb-2 text-center bg-transparent text-slate-800"
+                    style={{fontSize:'var(--fs-2xl)'}}
+                    value={newName}
+                    onChange={e=>setNewName(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter') handleSave(); }}
+                    autoFocus/>
+                {isDup && <p className="text-caption text-rose-500 text-center mb-4">同じ名前のカテゴリがあります</p>}
+                {!isDup && <div className="mb-4"/>}
+                <div className="flex flex-col gap-3">
+                    <button onClick={handleSave} disabled={!canSave}
+                        className={`py-4 rounded-2xl font-black shadow-lg ${canSave?'bg-indigo-600 text-white':'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                        変更する
+                    </button>
+                    <button onClick={onClose} className="text-slate-400 py-2 font-black text-caption text-center">キャンセル</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── useGlobalSettings hook ───────────────────────────────────────────────────
 // カテゴリ（tags）と固定費テンプレートを月をまたいでグローバルに管理する。
 const useGlobalSettings = () => {
@@ -1726,10 +1761,29 @@ const ReportView = ({currentMonth, budget, tagBudgets, expenses, incomes, tags, 
 
 // ─── SettingsView ─────────────────────────────────────────────────────────────
 // 設定画面。カテゴリ管理（予算額も表示）・固定費テンプレート・CSVエクスポート・アプリ情報。
-const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, fixedTemplates, updateFirebase, updateTags, updateFixedTemplates, showToast}) => {
+const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, fixedTemplates, updateFirebase, updateTags, updateFixedTemplates, monthRef, showToast}) => {
     const [confirmDelete,    setConfirmDelete]    = useState(null);
     const [isAddingTag,      setIsAddingTag]      = useState(false);
     const [isAddingTemplate, setIsAddingTemplate] = useState(false);
+    const [editingTag,       setEditingTag]       = useState(null);
+
+    const handleRenameTag = useCallback(async (oldTag, newTag) => {
+        const updatedTags  = tags.map(t => t === oldTag ? newTag : t);
+        const newBudgets   = {...tagBudgets};
+        if (newBudgets[oldTag] !== undefined) {
+            newBudgets[newTag] = newBudgets[oldTag];
+            delete newBudgets[oldTag];
+        }
+        updateTags(updatedTags);
+        updateFirebase({tagBudgets: newBudgets});
+        const toUpdate = expenses.filter(e => e.tag === oldTag);
+        if (toUpdate.length > 0) {
+            const batch = db.batch();
+            toUpdate.forEach(e => batch.update(monthRef.collection('expenses').doc(e.id), {tag: newTag}));
+            await batch.commit();
+        }
+        showToast(`「${oldTag}」→「${newTag}」に変更しました`, 'success');
+    }, [tags, tagBudgets, expenses, monthRef, updateTags, updateFirebase, showToast]);
 
     const handleDeleteTag = useCallback((tag) => {
         const updated    = tags.filter(t=>t!==tag);
@@ -1797,6 +1851,11 @@ const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, fixedTemplat
                                 {inUse && (
                                     <span className="text-caption text-slate-400 bg-white px-2 py-0.5 rounded-lg border border-slate-200">使用中</span>
                                 )}
+                                <button
+                                    onClick={()=>setEditingTag(t)}
+                                    className="w-8 h-8 rounded-xl flex items-center justify-center text-indigo-400 bg-indigo-50 hover:bg-indigo-100 active:scale-90 transition-all">
+                                    <Icon name="edit-3" size={14}/>
+                                </button>
                                 <button
                                     onClick={()=>setConfirmDelete({tag:t, inUse})}
                                     disabled={inUse}
@@ -1882,6 +1941,13 @@ const SettingsView = ({tags, tagBudgets, expenses, incomes, budget, fixedTemplat
                 <Portal><AddTagModal tags={tags}
                     onAdd={name=>{ updateTags([...tags,name]); showToast(`「${name}」を追加しました`,'success'); }}
                     onClose={()=>setIsAddingTag(false)}/></Portal>
+            )}
+            {editingTag && (
+                <Portal><EditTagModal
+                    tagName={editingTag}
+                    tags={tags}
+                    onSave={newName=>{ handleRenameTag(editingTag, newName); setEditingTag(null); }}
+                    onClose={()=>setEditingTag(null)}/></Portal>
             )}
             {isAddingTemplate && (
                 <Portal><AddFixedTemplateModal tags={tags}
