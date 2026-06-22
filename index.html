@@ -1042,6 +1042,111 @@ const ExpenseItem = ({item, tags, onDelete, onSave}) => {
     );
 };
 
+// ─── WeeklyBudgetCard ─────────────────────────────────────────────────────────
+// 先週の変動費が週予算を超えていた場合のみ表示するカード。
+// 超過分を今週の予算から差し引き、残り日数での1日あたり目安を提示する。
+const WeeklyBudgetCard = ({expenses, budget, currentMonth}) => {
+    if (budget <= 0 || currentMonth !== monthStr()) return null;
+
+    const today      = new Date();
+    const [y, m]     = currentMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const monthStart  = new Date(y, m - 1, 1, 0, 0, 0, 0);
+    const monthEnd    = new Date(y, m, 0, 23, 59, 59, 999);
+
+    // 月にまたがる月曜〜日曜の週リストを生成
+    const buildWeeks = () => {
+        const weeks = [];
+        let ws = new Date(monthStart);
+        const dow = ws.getDay();
+        ws.setDate(ws.getDate() - (dow === 0 ? 6 : dow - 1)); // 直前の月曜に戻す
+        while (ws <= monthEnd) {
+            const we = new Date(ws);
+            we.setDate(we.getDate() + 6);
+            we.setHours(23, 59, 59, 999);
+            const effEnd = new Date(Math.min(we.getTime(), monthEnd.getTime()));
+            const effStart = new Date(Math.max(ws.getTime(), monthStart.getTime()));
+            const days = Math.round((effEnd - effStart) / 86400000) + 1;
+            weeks.push({ start: new Date(ws), end: new Date(we), effEnd, days });
+            ws = new Date(ws);
+            ws.setDate(ws.getDate() + 7);
+        }
+        return weeks;
+    };
+
+    const weeks       = buildWeeks();
+    const varExpenses = expenses.filter(e => !e.isFixed);
+
+    const weekData = weeks.map(w => {
+        const spent = varExpenses
+            .filter(e => typeof e.createdAtMillis === 'number'
+                && e.createdAtMillis >= w.start.getTime()
+                && e.createdAtMillis <= w.end.getTime())
+            .reduce((s, e) => s + e.amount, 0);
+        const weekBudget = Math.round(budget * w.days / daysInMonth);
+        return { ...w, spent, weekBudget,
+            isCompleted: today > w.end,
+            isCurrent:   today >= w.start && today <= w.end };
+    });
+
+    // 終了済み週の超過分を累計（マイナスは節約として相殺）
+    const carryForward = weekData
+        .filter(w => w.isCompleted)
+        .reduce((sum, w) => sum + (w.spent - w.weekBudget), 0);
+
+    if (carryForward <= 0) return null;
+
+    const cur = weekData.find(w => w.isCurrent);
+    if (!cur) return null;
+
+    const adjustedBudget  = Math.max(0, cur.weekBudget - carryForward);
+    const remaining       = adjustedBudget - cur.spent;
+    const todayEnd        = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    const remainingDays   = Math.max(0, Math.round((cur.effEnd - todayEnd) / 86400000));
+    const dailySuggestion = remaining > 0 && remainingDays > 0 ? Math.floor(remaining / remainingDays) : null;
+    const isOver          = remaining < 0;
+
+    return (
+        <div className="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-[2.5rem] p-5 anim-slide">
+            <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                    <Icon name="alert-triangle" size={14} className="text-amber-600"/>
+                </div>
+                <div className="min-w-0">
+                    <p className="font-black text-amber-700" style={{fontSize:'11px'}}>先週の使いすぎを繰り越し中</p>
+                    <p className="text-caption text-amber-500" style={{fontSize:'10px'}}>超過分 ¥{fmt(carryForward)} を今週の予算から差し引きました</p>
+                </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="bg-white rounded-2xl p-3 text-center">
+                    <p className="text-label text-slate-400 mb-1" style={{fontSize:'9px'}}>今週の予算</p>
+                    <p className="tabular-nums text-slate-400 line-through" style={{fontSize:'10px'}}>¥{fmt(cur.weekBudget)}</p>
+                    <p className="font-black text-amber-700 tabular-nums" style={{fontSize:'var(--fs-sm)'}}>¥{fmt(adjustedBudget)}</p>
+                </div>
+                <div className="bg-white rounded-2xl p-3 text-center">
+                    <p className="text-label text-slate-400 mb-1" style={{fontSize:'9px'}}>今週の支出</p>
+                    <p className="font-black text-rose-500 tabular-nums" style={{fontSize:'var(--fs-sm)'}}>¥{fmt(cur.spent)}</p>
+                </div>
+                <div className={`rounded-2xl p-3 text-center ${isOver ? 'bg-rose-50' : 'bg-white'}`}>
+                    <p className={`text-label mb-1 ${isOver ? 'text-rose-400' : 'text-slate-400'}`} style={{fontSize:'9px'}}>今週の残り</p>
+                    <p className={`font-black tabular-nums ${isOver ? 'text-rose-500' : 'text-emerald-600'}`} style={{fontSize:'var(--fs-sm)'}}>
+                        {isOver ? '−' : ''}¥{fmt(Math.abs(remaining))}
+                    </p>
+                </div>
+            </div>
+            {dailySuggestion !== null ? (
+                <p className="font-black text-amber-700 text-center" style={{fontSize:'11px'}}>
+                    残り{remainingDays}日 — 1日あたり <span className="text-amber-900">¥{fmt(dailySuggestion)}</span> に抑えましょう
+                </p>
+            ) : isOver ? (
+                <p className="font-black text-rose-500 text-center" style={{fontSize:'11px'}}>
+                    今週も予算をオーバー — 超過分は来週に繰り越されます
+                </p>
+            ) : null}
+        </div>
+    );
+};
+
 // ─── HomeView ─────────────────────────────────────────────────────────────────
 // ホーム画面。別月表示バナー・カテゴリフィルター・支出履歴リスト。
 const HomeView = ({budget, tagBudgets, expenses, incomes, tags, fixedTemplates, updateFirebase, monthRef, showToast, currentMonth, onGoToCurrentMonth}) => {
@@ -1179,6 +1284,7 @@ const HomeView = ({budget, tagBudgets, expenses, incomes, tags, fixedTemplates, 
     return (
         <div className="anim-slide">
             <MonthlySummaryCard budget={budget} totalFixed={totalFixed} totalVariable={totalVariable} totalIncome={totalIncome} onEditBudget={()=>setShowBudget(true)} currentMonth={currentMonth}/>
+            <WeeklyBudgetCard expenses={expenses} budget={budget} currentMonth={currentMonth}/>
 
             <div className="px-6">
                 {/* 別月閲覧バナー */}
